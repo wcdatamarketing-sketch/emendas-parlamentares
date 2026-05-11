@@ -41,10 +41,12 @@ st.set_page_config(
 # Verifica se a chave existe no session_state
 # (foi guardada lá pelo app.py quando o usuário entrou no site)
 if "api_key" not in st.session_state:
-    st.error("⚠️ Acesse a plataforma pela página inicial.")
-    st.stop()
+    if "api_key" in st.secrets:
+        st.session_state.api_key = st.secrets["api_key"]
+    else:
+        st.error("⚠️ Chave da API não configurada.")
+        st.stop()
 
-# Pega a chave do session_state para usar nas chamadas de API
 api_key = st.session_state.api_key
 
 
