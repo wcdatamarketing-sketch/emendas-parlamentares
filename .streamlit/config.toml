@@ -1,3 +1,5 @@
+[runtime]
+pythonVersion = "3.11"
 # ============================================================
 # .streamlit/config.toml
 # Configurações visuais e de comportamento do Streamlit
