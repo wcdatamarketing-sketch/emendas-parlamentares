@@ -112,10 +112,11 @@ with col_uf:
 # st.spinner exibe uma animação de carregamento enquanto
 # os dados estão sendo buscados — melhora a experiência do usuário
 with st.spinner("Buscando dados da API do Portal da Transparência..."):
-    
-    # Chama a função de cache que busca os dados
-    # se já foram buscados na última hora, vem instantâneo
-    emendas_raw = cache_emendas_ranking(api_key, ano)
+    try:
+        emendas_raw = cache_emendas_ranking(api_key, ano)
+    except Exception as e:
+        st.error(f"Erro detalhado: {str(e)}")
+        st.stop()
 
 # Se não retornou nenhum dado, exibe aviso e para a execução
 if not emendas_raw:
