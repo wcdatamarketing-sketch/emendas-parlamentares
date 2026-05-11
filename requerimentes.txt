@@ -1,4 +1,0 @@
-streamlit==1.45.0       →    import streamlit as st
-requests==2.32.3        →    import requests
-pandas==2.2.3           →    import pandas as pd
-plotly==6.0.1           →    import plotly.express as px
