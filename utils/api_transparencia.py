@@ -51,26 +51,31 @@ def _montar_cabecalho(api_key: str) -> dict:
 def _buscar_pagina(endpoint: str, parametros: dict, api_key: str) -> list:
     """
     Faz UMA requisição à API e retorna os dados recebidos.
-    
-    endpoint:   o caminho específico da API (ex: "/emendas-parlamentares")
-    parametros: os filtros da busca (ex: ano, nome do autor)
-    api_key:    sua chave de acesso
-    retorna:    lista com os dados retornados pela API
     """
     
-    # Monta a URL completa juntando a base com o endpoint
-    # Exemplo: "https://api.portaldatransparencia.gov.br/api-de-dados/emendas-parlamentares"
     url_completa = f"{BASE_URL}{endpoint}"
     
-    # Faz a requisição GET — é como digitar uma URL no navegador
-    # "params" são os filtros que vão aparecer após o "?" na URL
-    # "headers" é o cabeçalho com nossa chave de acesso
+    # Monta o cabeçalho com a chave — exatamente como a API exige
+    cabecalho = {
+        "chave-api-dados": api_key.strip(),  # strip() remove espaços invisíveis
+        "Accept": "application/json",
+    }
+    
     resposta = requests.get(
         url_completa,
         params=parametros,
-        headers=_montar_cabecalho(api_key),
-        timeout=15,  # se não responder em 15 segundos, desiste
+        headers=cabecalho,
+        timeout=15,
     )
+    
+    if resposta.status_code != 200:
+        raise RuntimeError(
+            f"Erro HTTP {resposta.status_code}: {resposta.text[:300]}"
+        )
+    
+    dados = resposta.json()
+    time.sleep(PAUSA_ENTRE_REQUISICOES)
+    return dados if dados else []
     
     # Se a API retornou erro (ex: 401 sem autorização, 500 erro interno)
     # o raise_for_status() lança uma exceção e para a execução
