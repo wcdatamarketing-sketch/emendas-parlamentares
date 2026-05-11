@@ -1,0 +1,39 @@
+# ============================================================
+# .streamlit/config.toml
+# Configurações visuais e de comportamento do Streamlit
+# Esse arquivo é lido automaticamente pelo Streamlit
+# ============================================================
+
+[theme]
+# Cor primária — usada em botões, links e elementos interativos
+primaryColor = "#2e6da4"
+
+# Cor de fundo da página principal
+backgroundColor = "#ffffff"
+
+# Cor de fundo do menu lateral e campos de input
+secondaryBackgroundColor = "#f0f4f8"
+
+# Cor do texto principal
+textColor = "#1a3a5c"
+
+# Fonte base do site
+font = "sans serif"
+
+
+[server]
+# Tamanho máximo de upload de arquivo em MB
+# não usamos upload no projeto mas é boa prática definir
+maxUploadSize = 10
+
+# Habilita o CORS para permitir acesso externo
+# necessário para o Streamlit Cloud funcionar corretamente
+enableCORS = false
+
+# Habilita o XSRF para segurança
+enableXsrfProtection = true
+
+
+[browser]
+# Desativa a coleta de estatísticas de uso pelo Streamlit
+gatherUsageStats = false
