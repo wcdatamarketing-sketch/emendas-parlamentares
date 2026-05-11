@@ -74,7 +74,10 @@ def _buscar_pagina(endpoint: str, parametros: dict, api_key: str) -> list:
     
     # Se a API retornou erro (ex: 401 sem autorização, 500 erro interno)
     # o raise_for_status() lança uma exceção e para a execução
-    resposta.raise_for_status()
+    if resposta.status_code != 200:
+        raise RuntimeError(
+            f"Erro HTTP {resposta.status_code}: {resposta.text[:500]}"
+        )
     
     # .json() converte o texto da resposta em uma lista Python
     # a API devolve texto no formato JSON, que parece com um dicionário
