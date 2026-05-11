@@ -167,19 +167,10 @@ def buscar_emendas_por_autor(api_key: str, nome_autor: str, ano: int) -> list:
 
 
 def buscar_emendas_ranking(api_key: str, ano: int) -> list:
-    """
-    Busca emendas para montar o ranking geral da tela inicial.
-    Retorna emendas de todos os parlamentares no ano informado.
-    
-    api_key: chave de acesso à API
-    ano:     ano de referência
-    retorna: lista de emendas para montar o ranking
-    """
-    
     parametros = {
         "ano": ano,
+        "pagina": 1,
     }
-    
     return _buscar_todas_paginas(
         endpoint="/emendas-parlamentares",
         parametros=parametros,
