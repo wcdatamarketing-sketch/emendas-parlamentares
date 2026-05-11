@@ -34,8 +34,11 @@ st.set_page_config(
 # ============================================================
 
 if "api_key" not in st.session_state:
-    st.error("⚠️ Acesse a plataforma pela página inicial.")
-    st.stop()
+    if "api_key" in st.secrets:
+        st.session_state.api_key = st.secrets["api_key"]
+    else:
+        st.error("⚠️ Chave da API não configurada.")
+        st.stop()
 
 api_key = st.session_state.api_key
 
