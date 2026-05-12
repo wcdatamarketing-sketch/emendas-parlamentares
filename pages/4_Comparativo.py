@@ -211,6 +211,17 @@ st.divider()
 # FUNÇÕES AUXILIARES
 # ============================================================
 
+def _card(titulo: str, valor: str) -> str:
+    """Gera HTML de um card de métrica com fonte reduzida."""
+    return (
+        f"<div style='background:#f0f4f8;border:1px solid #d0dce8;"
+        f"border-radius:8px;padding:10px 14px;text-align:center'>"
+        f"<div style='color:#666;font-size:0.72rem;margin-bottom:4px'>{titulo}</div>"
+        f"<div style='color:#1a3a5c;font-size:1.05rem;font-weight:600'>{valor}</div>"
+        f"</div>"
+    )
+
+
 def emendas_de(identificador, modo_partido: bool, df: pd.DataFrame) -> pd.DataFrame:
     """Filtra o DataFrame pelo deputado (nome) ou partido."""
     if modo_partido:
@@ -433,16 +444,6 @@ st.markdown("<br>", unsafe_allow_html=True)
 
 st.markdown("### 📊 Emendas")
 col_m1, col_m2 = st.columns(2)
-
-def _card(titulo: str, valor: str) -> str:
-    """Gera HTML de um card de métrica com fonte reduzida."""
-    return (
-        f"<div style='background:#f0f4f8;border:1px solid #d0dce8;"
-        f"border-radius:8px;padding:10px 14px;text-align:center'>"
-        f"<div style='color:#666;font-size:0.72rem;margin-bottom:4px'>{titulo}</div>"
-        f"<div style='color:#1a3a5c;font-size:1.05rem;font-weight:600'>{valor}</div>"
-        f"</div>"
-    )
 
 def _cards_metricas(res: dict, label: str, emoji: str) -> None:
     pct = f"{res['execucao']:.1f}%".replace(".", ",")
