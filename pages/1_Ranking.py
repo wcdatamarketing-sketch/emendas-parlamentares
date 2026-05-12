@@ -97,7 +97,7 @@ if not emendas_raw:
 df = pd.DataFrame(emendas_raw)
 
 # Mostra ao usuário quais colunas estão disponíveis (útil para debug)
-# st.write("Colunas disponíveis:", df.columns.tolist())
+st.write("Colunas disponíveis:", df.columns.tolist())
 
 # Converte valores monetários para número
 # (a API retorna esses campos como string em alguns casos)
