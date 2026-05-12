@@ -370,91 +370,100 @@ def carregar_top_favorecidos(
     top_n: int = 10,
 ) -> list:
     """
-    Retorna os top favorecidos (recebedores reais) por valor empenhado.
-    Usa o CSV de favorecidos (170 MB) que tem nomeFavorecido.
+    Retorna os top favorecidos por valor recebido.
 
-    Filtra por nome do autor (deputado) OU por partido.
-    Retorna lista de dicts: [{"favorecido": str, "valor": float, "periodo": str}]
+    Estratégia de cruzamento via codigoAutor (chave confiável):
+    1. Busca os codigoAutor do deputado/partido no CSV principal
+    2. Filtra o CSV de favorecidos por esses códigos
+    3. Agrega por favorecido e retorna top N
+
+    Isso evita problemas de variação de nome (maiúsculas, acentos etc.)
     """
-    df = _df_favorecido()
-    if df is None or df.empty:
+    df_fav = _df_favorecido()
+    if df_fav is None or df_fav.empty:
         return []
 
-    # Filtro por anos
-    if anos and "ano" in df.columns:
-        df = df[df["ano"].astype(str).isin([str(a) for a in anos])]
+    df_princ = _df_principal()
+    if df_princ is None or df_princ.empty:
+        return []
 
-    # Filtro por autor — o CSV tem nomes em MAIÚSCULAS
-    # Usa str.contains case-insensitive para tolerar variações de formatação
+    # Detecta coluna de código do autor nos dois CSVs
+    col_cod_fav = next(
+        (c for c in ["codigoAutor", "Código do Autor da Emenda"] if c in df_fav.columns), None
+    )
+    col_cod_princ = next(
+        (c for c in ["codigoAutor", "Código do Autor da Emenda"] if c in df_princ.columns), None
+    )
+
+    if not col_cod_fav or not col_cod_princ:
+        return []
+
+    # Filtra CSV principal pelo deputado ou partido e anos
+    df_p = df_princ.copy()
+    if anos:
+        df_p = df_p[df_p["ano"].astype(str).isin([str(a) for a in anos])]
+
     if nome_autor:
-        nome_upper = nome_autor.strip().upper()
-        # Tenta coluna mapeada primeiro, depois nome original
-        col_autor = next(
-            (c for c in ["nomeAutor", "Nome do Autor da Emenda"]
-             if c in df.columns),
-            None,
+        # Busca por nome no CSV principal para pegar o(s) código(s) do autor
+        col_nome = next(
+            (c for c in ["nomeAutor", "Nome do Autor da Emenda"] if c in df_p.columns), None
         )
-        if col_autor:
-            df = df[df[col_autor].str.upper().str.contains(nome_upper, na=False, regex=False)]
+        if col_nome:
+            nome_upper = nome_autor.strip().upper()
+            df_p = df_p[df_p[col_nome].str.upper().str.contains(nome_upper, na=False, regex=False)]
 
     elif sigla_partido:
-        # CSV de favorecidos não tem coluna de partido.
-        # Cruzamos com o CSV principal para pegar os códigos de emenda do partido,
-        # depois filtramos o CSV de favorecidos por esses códigos.
-        df_principal = _df_principal()
-        if df_principal is None or "codigoEmenda" not in df_principal.columns:
-            return []
-
-        col_partido_princ = next(
-            (c for c in ["partidoAutor", "siglaPartido"] if c in df_principal.columns),
-            None,
+        col_partido = next(
+            (c for c in ["partidoAutor", "siglaPartido"] if c in df_p.columns), None
         )
-        if not col_partido_princ:
-            return []
+        if col_partido:
+            df_p = df_p[df_p[col_partido].str.upper() == sigla_partido.upper()]
 
-        # Filtra CSV principal pelo partido e anos para pegar os códigos
-        df_p = df_principal.copy()
-        if anos:
-            df_p = df_p[df_p["ano"].astype(str).isin([str(a) for a in anos])]
-        df_p = df_p[df_p[col_partido_princ].str.upper() == sigla_partido.upper()]
+    if df_p.empty:
+        return []
 
-        if df_p.empty:
-            return []
+    # Pega os códigos de autor únicos
+    codigos_autor = set(df_p[col_cod_princ].dropna().astype(str).unique())
 
-        codigos = set(df_p["codigoEmenda"].dropna().unique())
+    # Filtra CSV de favorecidos pelos códigos de autor
+    df_fav = df_fav[df_fav[col_cod_fav].astype(str).isin(codigos_autor)]
 
-        if "codigoEmenda" not in df.columns:
-            return []
+    # Filtro de ano no CSV de favorecidos
+    col_ano_fav = next(
+        (c for c in ["ano", "Ano/Mês"] if c in df_fav.columns), None
+    )
+    if anos and col_ano_fav:
+        df_fav = df_fav[df_fav[col_ano_fav].astype(str).str[:4].isin([str(a) for a in anos])]
 
-        df = df[df["codigoEmenda"].isin(codigos)]
-
-    # Detecta colunas — mapeadas ou originais
-    col_fav = next(
-        (c for c in ["nomeFavorecido", "Favorecido"] if c in df.columns), None
+    # Detecta colunas de favorecido e valor
+    col_fav_nome = next(
+        (c for c in ["nomeFavorecido", "Favorecido"] if c in df_fav.columns), None
     )
     col_val = next(
-        (c for c in ["valorEmpenhado", "Valor Recebido"] if c in df.columns), None
-    )
-    col_ano = next(
-        (c for c in ["ano", "Ano/Mês"] if c in df.columns), None
+        (c for c in ["valorEmpenhado", "Valor Recebido"] if c in df_fav.columns), None
     )
 
-    if df.empty or not col_fav or not col_val:
+    if df_fav.empty or not col_fav_nome or not col_val:
         return []
 
     # Converte valor para número se necessário
-    if not pd.api.types.is_numeric_dtype(df[col_val]):
-        df[col_val] = df[col_val].astype(str).str.replace(".", "", regex=False).str.replace(",", ".", regex=False)
-        df[col_val] = pd.to_numeric(df[col_val], errors="coerce").fillna(0)
+    if not pd.api.types.is_numeric_dtype(df_fav[col_val]):
+        df_fav[col_val] = (
+            df_fav[col_val].astype(str)
+            .str.replace(".", "", regex=False)
+            .str.replace(",", ".", regex=False)
+        )
+        df_fav[col_val] = pd.to_numeric(df_fav[col_val], errors="coerce").fillna(0)
 
-    # Remove entradas sem favorecido
-    df = df[~df[col_fav].astype(str).str.strip().isin(["", "Sem informação", "S/I"])]
-    df = df[df[col_val] > 0]
+    # Remove entradas sem favorecido e sem valor
+    df_fav = df_fav[~df_fav[col_fav_nome].astype(str).str.strip().isin(["", "Sem informação", "S/I"])]
+    df_fav = df_fav[df_fav[col_val] > 0]
 
-    if df.empty:
+    if df_fav.empty:
         return []
 
-    # Extrai nome limpo do favorecido (remove código numérico do início se houver)
+    # Limpa nome do favorecido — remove código numérico do início se houver
+    # Ex: "8,09E+12 FUNDO MUNICIPAL DE SAUDE" → "FUNDO MUNICIPAL DE SAUDE"
     def _limpar_favorecido(nome):
         s = str(nome).strip()
         # Remove padrão "123456789 NOME" — código no início
@@ -465,15 +474,17 @@ def carregar_top_favorecidos(
 
     df["_fav_limpo"] = df[col_fav].apply(_limpar_favorecido)
 
-    # Extrai ano se necessário
-    if col_ano:
-        df["_ano"] = df[col_ano].astype(str).str[:4]
+    # Extrai ano
+    if col_ano_fav:
+        df_fav["_ano"] = df_fav[col_ano_fav].astype(str).str[:4]
     else:
-        df["_ano"] = "?"
+        df_fav["_ano"] = "?"
+
+    df_fav["_fav_limpo"] = df_fav[col_fav_nome].apply(_limpar_favorecido)
 
     # Agrega por favorecido
     top = (
-        df.groupby("_fav_limpo")
+        df_fav.groupby("_fav_limpo")
         .agg(
             valor=(col_val, "sum"),
             periodo=("_ano", lambda s: ", ".join(sorted(set(s)))),
