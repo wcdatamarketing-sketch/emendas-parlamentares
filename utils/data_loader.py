@@ -49,14 +49,15 @@ from utils.api_transparencia import (
 # IDs DOS ARQUIVOS NO GOOGLE DRIVE
 # ============================================================
 
-ID_EMENDAS_PRINCIPAL  = "16LzXbx5fPph1u_QO-mbbxxBkgADDp-7_x_zXAlC-UkQ"
-ID_EMENDAS_CONVENIOS  = "17D2GEU4W7Jh9c52UT2qm1RZN6FDlKaSA"
-ID_EMENDAS_FAVORECIDO = "1qolBJ8BNZtRGT-68UMWTxGVM1lQY8uKu"
+ID_EMENDAS_PRINCIPAL  = "1FWbRIT6a2i3d5Dz0rg6BCkO1My2XCTSw"   # 46 MB — CSV
+ID_EMENDAS_CONVENIOS  = "17D2GEU4W7Jh9c52UT2qm1RZN6FDlKaSA"   # 24 MB — CSV
+ID_EMENDAS_FAVORECIDO = "1qolBJ8BNZtRGT-68UMWTxGVM1lQY8uKu"   # 170 MB — CSV
 
-# URL para arquivos pequenos (< 25 MB)
+# URL para arquivos até ~25 MB
 URL_DOWNLOAD = "https://drive.google.com/uc?export=download&id={file_id}"
 
-# URL para arquivos grandes (> 25 MB) — bypassa tela de confirmação do Drive
+# URL para arquivos grandes (> 25 MB) — bypassa confirmação do Drive
+# Usada para os 3 arquivos pois todos passam de 25 MB
 URL_DOWNLOAD_GRANDE = (
     "https://drive.google.com/uc?export=download&confirm=t&id={file_id}"
 )
@@ -212,7 +213,7 @@ def _df_para_lista(df: pd.DataFrame) -> list:
 
 @st.cache_data(ttl=3600, show_spinner="Carregando base de emendas...")
 def _df_principal() -> pd.DataFrame | None:
-    df = _baixar_csv_drive(ID_EMENDAS_PRINCIPAL, grande=False)
+    df = _baixar_csv_drive(ID_EMENDAS_PRINCIPAL, grande=True)  # 46 MB
     if df is not None:
         df = _aplicar_mapeamento(df, COLUNAS_PRINCIPAL)
     return df
