@@ -2,14 +2,13 @@
 # utils/cache.py
 # Camada de cache entre as telas e as funções de dados.
 #
-# ATUALIZAÇÃO: agora chama o data_loader.py em vez da API
-# diretamente. O data_loader decide automaticamente se usa
-# os CSVs do Google Drive ou cai na API como fallback.
+# Regra geral: ttl=3600 (1 hora) para dados que mudam pouco.
+# A lista de deputados da legislatura usa ttl=86400 (24h)
+# pois muda muito raramente.
 # ============================================================
 
 import streamlit as st
 
-# Importamos do data_loader — ele centraliza toda a lógica de dados
 from utils.data_loader import (
     carregar_emendas_ranking,
     carregar_emendas_por_autor,
@@ -18,17 +17,22 @@ from utils.data_loader import (
     carregar_detalhe_emenda,
 )
 
-# A API da Câmara não muda — continua sendo chamada diretamente
 from utils.api_camara import (
+    buscar_deputados_legislatura,
     buscar_deputados,
     buscar_deputado_por_id,
-    buscar_proposicoes_do_deputado,
     buscar_deputado_por_nome,
+    buscar_partidos_legislatura,
+    buscar_proposicoes_do_deputado,
+    buscar_leis_aprovadas,
+    buscar_relatorias_aprovadas,
+    buscar_votacoes_do_deputado,
+    buscar_votacoes_do_partido,
 )
 
 
 # ============================================================
-# CACHE — PORTAL DA TRANSPARÊNCIA (via data_loader)
+# PORTAL DA TRANSPARÊNCIA (via data_loader)
 # ============================================================
 
 @st.cache_data(ttl=3600)
@@ -57,8 +61,27 @@ def cache_emendas_por_favorecido(api_key: str, nome_favorecido: str, ano: int) -
 
 
 # ============================================================
-# CACHE — CÂMARA DOS DEPUTADOS (sem alteração)
+# CÂMARA — DEPUTADOS
 # ============================================================
+
+@st.cache_data(ttl=86400)
+def cache_deputados_legislatura(id_legislatura: int = 57) -> list:
+    """
+    Lista completa de deputados da legislatura.
+    Usada para filtrar senadores da base CSV e popular selects.
+    TTL de 24h pois a lista muda raramente.
+    """
+    return buscar_deputados_legislatura(id_legislatura)
+
+
+@st.cache_data(ttl=86400)
+def cache_partidos_legislatura(id_legislatura: int = 57) -> list:
+    """
+    Lista de siglas de partidos com deputados na legislatura.
+    Usada para popular o select de partidos no Comparativo.
+    """
+    return buscar_partidos_legislatura(id_legislatura)
+
 
 @st.cache_data(ttl=3600)
 def cache_deputados(uf: str = None, partido: str = None) -> list:
@@ -71,10 +94,65 @@ def cache_deputado_por_id(id_deputado: int) -> dict:
 
 
 @st.cache_data(ttl=3600)
-def cache_proposicoes_do_deputado(id_deputado: int, ano: int = None) -> list:
-    return buscar_proposicoes_do_deputado(id_deputado, ano)
+def cache_deputado_por_nome(nome: str) -> list:
+    return buscar_deputado_por_nome(nome)
+
+
+# ============================================================
+# CÂMARA — PROPOSIÇÕES E LEIS
+# ============================================================
+
+@st.cache_data(ttl=3600)
+def cache_proposicoes_do_deputado(
+    id_deputado: int,
+    ano_inicio: int = 2023,
+    ano_fim: int = 2026,
+) -> list:
+    return buscar_proposicoes_do_deputado(id_deputado, ano_inicio, ano_fim)
 
 
 @st.cache_data(ttl=3600)
-def cache_deputado_por_nome(nome: str) -> list:
-    return buscar_deputado_por_nome(nome)
+def cache_leis_aprovadas(
+    id_deputado: int,
+    ano_inicio: int = 2023,
+    ano_fim: int = 2026,
+) -> list:
+    """Leis aprovadas onde o deputado foi AUTOR."""
+    return buscar_leis_aprovadas(id_deputado, ano_inicio, ano_fim)
+
+
+@st.cache_data(ttl=3600)
+def cache_relatorias_aprovadas(
+    id_deputado: int,
+    ano_inicio: int = 2023,
+    ano_fim: int = 2026,
+) -> list:
+    """Leis aprovadas onde o deputado foi RELATOR."""
+    return buscar_relatorias_aprovadas(id_deputado, ano_inicio, ano_fim)
+
+
+# ============================================================
+# CÂMARA — VOTAÇÕES
+# ============================================================
+
+@st.cache_data(ttl=3600)
+def cache_votacoes_do_deputado(
+    id_deputado: int,
+    ano_inicio: int = 2023,
+    ano_fim: int = 2026,
+) -> list:
+    """Votações nominais de um deputado."""
+    return buscar_votacoes_do_deputado(id_deputado, ano_inicio, ano_fim)
+
+
+@st.cache_data(ttl=3600)
+def cache_votacoes_do_partido(
+    sigla_partido: str,
+    id_legislatura: int = 57,
+    ano_inicio: int = 2023,
+    ano_fim: int = 2026,
+) -> dict:
+    """Votações agregadas de todos os deputados de um partido."""
+    return buscar_votacoes_do_partido(
+        sigla_partido, id_legislatura, ano_inicio, ano_fim
+    )
