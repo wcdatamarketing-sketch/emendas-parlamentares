@@ -98,19 +98,23 @@ if not todas_emendas:
 
 df_base = pd.DataFrame(todas_emendas)
 
-# Converte valores monetários logo após carregar
+# Converte valores monetários — só converte se ainda não for numérico
+# (o data_loader já pode ter feito isso; reconverter corromperia os valores)
 colunas_valor_base = [
     "valorEmpenhado", "valorLiquidado", "valorPago",
     "valorRestoInscrito", "valorRestoCancelado", "valorRestoPago"
 ]
 for coluna in colunas_valor_base:
     if coluna in df_base.columns:
-        df_base[coluna] = (
-            df_base[coluna].astype(str)
-            .str.replace(".", "", regex=False)
-            .str.replace(",", ".", regex=False)
-        )
-        df_base[coluna] = pd.to_numeric(df_base[coluna], errors="coerce").fillna(0)
+        if not pd.api.types.is_numeric_dtype(df_base[coluna]):
+            df_base[coluna] = (
+                df_base[coluna].astype(str)
+                .str.replace(".", "", regex=False)
+                .str.replace(",", ".", regex=False)
+            )
+            df_base[coluna] = pd.to_numeric(df_base[coluna], errors="coerce").fillna(0)
+        else:
+            df_base[coluna] = df_base[coluna].fillna(0)
 
 if "tipoEmenda" in df_base.columns:
     df_base["tipoResumido"] = df_base["tipoEmenda"].apply(resumir_tipo)
@@ -378,6 +382,18 @@ def _grafico_funcao(df_fonte: pd.DataFrame, titulo: str, subtitulo: str):
     st.markdown(f"### {titulo}")
     st.caption(subtitulo)
 
+    # Formata os valores para exibição legível no eixo X
+    def _fmt_resumido(v):
+        if v >= 1_000_000_000:
+            return f"R$ {v/1_000_000_000:.1f} bi".replace(".", ",")
+        if v >= 1_000_000:
+            return f"R$ {v/1_000_000:.1f} mi".replace(".", ",")
+        if v >= 1_000:
+            return f"R$ {v/1_000:.0f} mil"
+        return f"R$ {v:.0f}"
+
+    por_funcao["valor_fmt"] = por_funcao["Empenhado"].apply(_fmt_resumido)
+
     fig = px.bar(
         por_funcao,
         x="Empenhado",
@@ -385,10 +401,12 @@ def _grafico_funcao(df_fonte: pd.DataFrame, titulo: str, subtitulo: str):
         orientation="h",
         color="Empenhado",
         color_continuous_scale="Blues",
-        labels={"Empenhado": "R$ Empenhado", "Área": ""},
+        text="valor_fmt",
+        labels={"Empenhado": "", "Área": ""},
     )
     fig.update_layout(
         yaxis={"categoryorder": "total ascending"},
+        xaxis={"visible": False},
         height=420,
         plot_bgcolor="white",
         paper_bgcolor="white",
@@ -396,7 +414,8 @@ def _grafico_funcao(df_fonte: pd.DataFrame, titulo: str, subtitulo: str):
         margin=dict(l=10, r=10, t=10, b=10),
     )
     fig.update_traces(
-        hovertemplate="<b>%{y}</b><br>R$ %{x:,.0f}<extra></extra>"
+        textposition="outside",
+        hovertemplate="<b>%{y}</b><br>%{text}<extra></extra>",
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -428,44 +447,121 @@ st.divider()
 
 
 # ============================================================
-# GRÁFICO TOP 20
+# 3 GRÁFICOS TOP 10 — Empenhado | Pago | % Execução
 # ============================================================
 
-st.markdown("### 🏆 Top 20 por valor empenhado")
+st.markdown("### 🏆 Top 10 parlamentares")
 
-top20 = ranking.head(20).copy()
-top20["nome_curto"] = top20["nomeAutor"].apply(limpar_nome)
+top10 = ranking.head(10).copy()
+top10["nome_curto"] = top10["nomeAutor"].apply(limpar_nome)
 
-fig = px.bar(
-    top20,
-    x="total_empenhado",
-    y="nome_curto",
-    orientation="h",
-    color="tipo",
-    hover_data={"quantidade": True, "execucao": True, "periodo": True, "nome_curto": False},
-    labels={
-        "total_empenhado": "Empenhado (R$)",
-        "nome_curto": "",
-        "tipo": "Tipo",
-        "execucao": "Execução",
-        "periodo": "Período",
-        "quantidade": "Emendas",
-    },
-    color_discrete_sequence=px.colors.qualitative.Set2,
-)
-fig.update_layout(
-    yaxis={"categoryorder": "total ascending"},
-    height=600,
-    showlegend=True,
-    plot_bgcolor="white",
-    paper_bgcolor="white",
-    margin=dict(l=20, r=20, t=20, b=20),
-    legend=dict(title="Tipo", orientation="h", y=-0.15),
-)
-fig.update_traces(
-    hovertemplate="<b>%{y}</b><br>Empenhado: R$ %{x:,.0f}<extra></extra>"
-)
-st.plotly_chart(fig, use_container_width=True)
+def _fmt_eixo(v):
+    """Formata valor para rótulo de barra."""
+    if v >= 1_000_000_000:
+        return f"R$ {v/1_000_000_000:.1f} bi".replace(".", ",")
+    if v >= 1_000_000:
+        return f"R$ {v/1_000_000:.1f} mi".replace(".", ",")
+    if v >= 1_000:
+        return f"R$ {v/1_000:.0f} mil"
+    return f"R$ {v:.0f}"
+
+top10["emp_fmt"]  = top10["total_empenhado"].apply(_fmt_eixo)
+top10["pago_fmt"] = top10["total_pago"].apply(_fmt_eixo)
+
+graf1, graf2, graf3 = st.columns(3)
+
+# --- Gráfico 1: Empenhado ---
+with graf1:
+    st.markdown("##### 💼 Valor Empenhado")
+    fig1 = px.bar(
+        top10.sort_values("total_empenhado"),
+        x="total_empenhado",
+        y="nome_curto",
+        orientation="h",
+        text="emp_fmt",
+        color_discrete_sequence=["#2e6da4"],
+        labels={"total_empenhado": "", "nome_curto": ""},
+    )
+    fig1.update_layout(
+        xaxis={"visible": False},
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        height=420,
+        margin=dict(l=5, r=60, t=10, b=10),
+        showlegend=False,
+    )
+    fig1.update_traces(
+        textposition="outside",
+        hovertemplate="<b>%{y}</b><br>%{text}<extra></extra>",
+    )
+    st.plotly_chart(fig1, use_container_width=True)
+
+# --- Gráfico 2: Pago ---
+with graf2:
+    st.markdown("##### 💸 Valor Pago")
+    fig2 = px.bar(
+        top10.sort_values("total_pago"),
+        x="total_pago",
+        y="nome_curto",
+        orientation="h",
+        text="pago_fmt",
+        color_discrete_sequence=["#27ae60"],
+        labels={"total_pago": "", "nome_curto": ""},
+    )
+    fig2.update_layout(
+        xaxis={"visible": False},
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        height=420,
+        margin=dict(l=5, r=60, t=10, b=10),
+        showlegend=False,
+    )
+    fig2.update_traces(
+        textposition="outside",
+        hovertemplate="<b>%{y}</b><br>%{text}<extra></extra>",
+    )
+    st.plotly_chart(fig2, use_container_width=True)
+
+# --- Gráfico 3: % Execução ---
+with graf3:
+    st.markdown("##### ✅ % Execução")
+    top10_exec = top10.sort_values("execucao_pct").copy()
+    top10_exec["exec_fmt"] = top10_exec["execucao_pct"].apply(
+        lambda v: f"{v:.1f}%".replace(".", ",")
+    )
+    # Cor por faixa de execução
+    def _cor_exec(v):
+        if v >= 75:
+            return "#27ae60"   # verde — boa execução
+        if v >= 40:
+            return "#f39c12"   # laranja — execução média
+        return "#e74c3c"       # vermelho — baixa execução
+
+    top10_exec["cor"] = top10_exec["execucao_pct"].apply(_cor_exec)
+
+    fig3 = px.bar(
+        top10_exec,
+        x="execucao_pct",
+        y="nome_curto",
+        orientation="h",
+        text="exec_fmt",
+        color="cor",
+        color_discrete_map="identity",
+        labels={"execucao_pct": "", "nome_curto": ""},
+    )
+    fig3.update_layout(
+        xaxis={"visible": False, "range": [0, 115]},
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        height=420,
+        margin=dict(l=5, r=60, t=10, b=10),
+        showlegend=False,
+    )
+    fig3.update_traces(
+        textposition="outside",
+        hovertemplate="<b>%{y}</b><br>Execução: %{text}<extra></extra>",
+    )
+    st.plotly_chart(fig3, use_container_width=True)
 
 
 # ============================================================
