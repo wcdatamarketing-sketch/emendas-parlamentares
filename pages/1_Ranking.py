@@ -11,6 +11,7 @@ from utils.cache import cache_emendas_ranking
 from utils.formatters import (
     formatar_moeda,
     formatar_moeda_resumida,
+    calcular_percentual_execucao,
     limpar_nome,
 )
 
@@ -55,16 +56,12 @@ st.divider()
 col_ano, col_tipo, col_local = st.columns(3)
 
 with col_ano:
-    ano = st.selectbox(
-        "Ano",
-        options=[2024, 2023, 2022],
-        index=0,
-    )
+    ano = st.selectbox("Ano", options=[2024, 2023, 2022], index=0)
 
 with col_tipo:
     tipo_emenda = st.selectbox(
         "Tipo de emenda",
-        options=["Todas", "Emenda Individual", "Emenda de Bancada", "Emenda de Comissão", "Emenda de Relator"],
+        options=["Todas", "Individual", "Bancada", "Comissão", "Relator"],
     )
 
 with col_local:
@@ -96,13 +93,14 @@ if not emendas_raw:
 
 df = pd.DataFrame(emendas_raw)
 
-# Mostra ao usuário quais colunas estão disponíveis (útil para debug)
-st.write("Colunas disponíveis:", df.columns.tolist())
+# Converte todas as colunas de valor para número
+colunas_valor = [
+    "valorEmpenhado", "valorLiquidado", "valorPago",
+    "valorRestoInscrito", "valorRestoCancelado", "valorRestoPago"
+]
 
-# Converte valores monetários para número
-# (a API retorna esses campos como string em alguns casos)
-for coluna in df.columns:
-    if "valor" in coluna.lower():
+for coluna in colunas_valor:
+    if coluna in df.columns:
         df[coluna] = pd.to_numeric(df[coluna], errors="coerce").fillna(0)
 
 
@@ -125,25 +123,23 @@ if df.empty:
 # AGRUPAMENTO POR AUTOR
 # ============================================================
 
-# Identifica qual coluna de valor usar (pode variar por endpoint)
-coluna_valor = None
-for opcao in ["valor", "valorEmpenhado", "valorPago", "valorTotal"]:
-    if opcao in df.columns:
-        coluna_valor = opcao
-        break
-
-if not coluna_valor:
-    st.error("API não retornou nenhum campo de valor. Colunas disponíveis: " + ", ".join(df.columns))
-    st.stop()
-
-# Agrupa por nome do autor da emenda
 ranking = df.groupby("nomeAutor").agg(
-    total=(coluna_valor, "sum"),
-    quantidade=(coluna_valor, "count"),
+    total_empenhado=("valorEmpenhado", "sum"),
+    total_pago=("valorPago", "sum"),
+    quantidade=("valorEmpenhado", "count"),
     tipo=("tipoEmenda", "first"),
 ).reset_index()
 
-ranking = ranking.sort_values("total", ascending=False)
+ranking = ranking.sort_values("total_empenhado", ascending=False)
+
+# Calcula percentual de execução
+ranking["execucao"] = ranking.apply(
+    lambda row: calcular_percentual_execucao(
+        row["total_empenhado"], row["total_pago"]
+    ),
+    axis=1,
+)
+
 ranking.insert(0, "posicao", range(1, len(ranking) + 1))
 
 
@@ -153,7 +149,7 @@ ranking.insert(0, "posicao", range(1, len(ranking) + 1))
 
 st.markdown("### 📈 Resumo do ano")
 
-c1, c2, c3 = st.columns(3)
+c1, c2, c3, c4 = st.columns(4)
 
 with c1:
     st.metric("Total de autores", len(ranking))
@@ -166,8 +162,14 @@ with c2:
 
 with c3:
     st.metric(
-        "Valor total",
-        formatar_moeda_resumida(ranking["total"].sum()),
+        "Empenhado",
+        formatar_moeda_resumida(ranking["total_empenhado"].sum()),
+    )
+
+with c4:
+    st.metric(
+        "Pago",
+        formatar_moeda_resumida(ranking["total_pago"].sum()),
     )
 
 st.divider()
@@ -177,19 +179,19 @@ st.divider()
 # GRÁFICO TOP 20
 # ============================================================
 
-st.markdown("### 🏆 Top 20 por valor total")
+st.markdown("### 🏆 Top 20 por valor empenhado")
 
 top20 = ranking.head(20)
 
 fig = px.bar(
     top20,
-    x="total",
+    x="total_empenhado",
     y="nomeAutor",
     orientation="h",
     color="tipo",
-    hover_data=["quantidade"],
+    hover_data=["quantidade", "execucao"],
     labels={
-        "total": "Valor Total (R$)",
+        "total_empenhado": "Empenhado (R$)",
         "nomeAutor": "Autor",
         "tipo": "Tipo de Emenda",
     },
@@ -201,7 +203,7 @@ fig.update_layout(
     showlegend=True,
     plot_bgcolor="white",
     paper_bgcolor="white",
-    margin=dict(l=200),
+    margin=dict(l=250),
 )
 
 st.plotly_chart(fig, use_container_width=True)
@@ -220,7 +222,9 @@ tabela = pd.DataFrame({
     "Autor": ranking["nomeAutor"].apply(limpar_nome),
     "Tipo": ranking["tipo"],
     "Emendas": ranking["quantidade"],
-    "Valor Total": ranking["total"].apply(formatar_moeda),
+    "Empenhado": ranking["total_empenhado"].apply(formatar_moeda),
+    "Pago": ranking["total_pago"].apply(formatar_moeda),
+    "Execução": ranking["execucao"],
 })
 
 st.dataframe(
