@@ -52,11 +52,12 @@ def _buscar_todas_paginas(endpoint: str, parametros: dict, api_key: str, max_pag
         
         todos_os_resultados.extend(dados_da_pagina)
         
-        if len(dados_da_pagina) < 100:
+        # A API retorna 15 itens por página por padrão
+        # Se veio menos de 15, é a última página
+        if len(dados_da_pagina) < 15:
             break
     
     return todos_os_resultados
-
 
 # ============================================================
 # FUNÇÕES PÚBLICAS
