@@ -101,8 +101,16 @@ colunas_valor = [
 
 for coluna in colunas_valor:
     if coluna in df.columns:
+        # Os valores vêm como string em formato brasileiro: "2.550,00"
+        # Precisamos converter: remover pontos (separador de milhar)
+        # e trocar a vírgula por ponto (separador decimal)
+        df[coluna] = (
+            df[coluna]
+            .astype(str)
+            .str.replace(".", "", regex=False)
+            .str.replace(",", ".", regex=False)
+        )
         df[coluna] = pd.to_numeric(df[coluna], errors="coerce").fillna(0)
-
 
 # ============================================================
 # APLICAÇÃO DOS FILTROS
