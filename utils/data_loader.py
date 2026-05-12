@@ -43,6 +43,7 @@ from utils.api_transparencia import (
     buscar_emendas_por_municipio,
     buscar_emendas_por_favorecido,
 )
+from utils.api_camara import buscar_deputados_legislatura
 
 
 # ============================================================
@@ -217,11 +218,37 @@ def _df_para_lista(df: pd.DataFrame) -> list:
 # Cada arquivo é baixado UMA vez e mantido em memória por 1h
 # ============================================================
 
+@st.cache_data(ttl=86400, show_spinner="Carregando lista de deputados...")
+def _nomes_deputados_federais() -> set:
+    """
+    Retorna um set com os nomes dos deputados federais da 57ª legislatura.
+    Usado para filtrar senadores e outros da base CSV.
+    TTL de 24h — lista muda raramente.
+    """
+    try:
+        deputados = buscar_deputados_legislatura(57)
+        # Normaliza os nomes para comparação: maiúsculas, sem espaços extras
+        return set(d.get("nome", "").strip().upper() for d in deputados if d.get("nome"))
+    except Exception:
+        return set()  # Se falhar, não filtra (evita perder dados)
+
+
 @st.cache_data(ttl=3600, show_spinner="Carregando base de emendas...")
 def _df_principal() -> pd.DataFrame | None:
     df = _baixar_csv_drive(ID_EMENDAS_PRINCIPAL, grande=True)  # 46 MB
     if df is not None:
         df = _aplicar_mapeamento(df, COLUNAS_PRINCIPAL)
+
+        # Filtra senadores — mantém só deputados federais da 57ª legislatura
+        # e registros sem autor identificado (anos antigos com "Sem informação")
+        nomes_deputados = _nomes_deputados_federais()
+        if nomes_deputados and "nomeAutor" in df.columns:
+            sem_info = df["nomeAutor"].str.strip().str.upper().isin(
+                {"SEM INFORMAÇÃO", "SEM INFORMACAO", "S/I", ""}
+            )
+            e_deputado = df["nomeAutor"].str.strip().str.upper().isin(nomes_deputados)
+            df = df[sem_info | e_deputado].copy()
+
     return df
 
 
@@ -318,9 +345,6 @@ def carregar_detalhe_emenda(api_key: str, codigo_emenda: str) -> dict:
                     resultado["objetoConvenio"]           = conv.get("objetoConvenio", "")
                     resultado["dataPublicacaoConvenio"]   = conv.get("dataPublicacaoConvenio", "")
             return resultado
-
-    from utils.api_transparencia import buscar_detalhe_emenda
-    return buscar_detalhe_emenda(api_key, codigo_emenda)
 
     from utils.api_transparencia import buscar_detalhe_emenda
     return buscar_detalhe_emenda(api_key, codigo_emenda)
