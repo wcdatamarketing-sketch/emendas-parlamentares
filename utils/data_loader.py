@@ -164,24 +164,30 @@ def _baixar_csv_drive(file_id: str, grande: bool = False) -> pd.DataFrame | None
         resposta = requests.get(url, timeout=120)
         resposta.raise_for_status()
 
-        # Tenta separador ponto-e-vírgula (padrão Portal da Transparência)
-        try:
-            df = pd.read_csv(
-                io.BytesIO(resposta.content),
-                sep=";",
-                encoding="utf-8-sig",
-                dtype=str,
-                low_memory=False,
-            )
-        except Exception:
-            # Fallback com vírgula
-            df = pd.read_csv(
-                io.BytesIO(resposta.content),
-                sep=",",
-                encoding="utf-8-sig",
-                dtype=str,
-                low_memory=False,
-            )
+        # Tenta as combinações de separador e encoding mais comuns.
+        # O Portal da Transparência exporta em latin-1 com ponto-e-vírgula.
+        df = None
+        for sep in [";", ","]:
+            for enc in ["latin-1", "cp1252", "utf-8-sig", "utf-8"]:
+                try:
+                    df = pd.read_csv(
+                        io.BytesIO(resposta.content),
+                        sep=sep,
+                        encoding=enc,
+                        dtype=str,
+                        low_memory=False,
+                    )
+                    # Só aceita se tiver mais de 1 coluna (leitura válida)
+                    if len(df.columns) > 1:
+                        break
+                    df = None
+                except Exception:
+                    df = None
+            if df is not None:
+                break
+
+        if df is None:
+            raise ValueError("Não foi possível ler o CSV — encoding/separador desconhecido.")
 
         df.columns = df.columns.str.strip()
         return df
@@ -312,6 +318,9 @@ def carregar_detalhe_emenda(api_key: str, codigo_emenda: str) -> dict:
                     resultado["objetoConvenio"]           = conv.get("objetoConvenio", "")
                     resultado["dataPublicacaoConvenio"]   = conv.get("dataPublicacaoConvenio", "")
             return resultado
+
+    from utils.api_transparencia import buscar_detalhe_emenda
+    return buscar_detalhe_emenda(api_key, codigo_emenda)
 
     from utils.api_transparencia import buscar_detalhe_emenda
     return buscar_detalhe_emenda(api_key, codigo_emenda)
