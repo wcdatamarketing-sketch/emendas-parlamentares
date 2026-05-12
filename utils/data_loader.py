@@ -52,7 +52,13 @@ from utils.api_camara import buscar_deputados_legislatura
 
 ID_EMENDAS_PRINCIPAL  = "1FWbRIT6a2i3d5Dz0rg6BCkO1My2XCTSw"   # 46 MB — CSV
 ID_EMENDAS_CONVENIOS  = "17D2GEU4W7Jh9c52UT2qm1RZN6FDlKaSA"   # 24 MB — CSV
-ID_EMENDAS_FAVORECIDO = "1qolBJ8BNZtRGT-68UMWTxGVM1lQY8uKu"   # 170 MB — CSV
+ID_EMENDAS_FAVORECIDO = "1qolBJ8BNZtRGT-68UMWTxGVM1lQY8uKu"   # 170 MB — CSV (Drive, fallback)
+
+# URL direta via GitHub Releases — sem bloqueio de download
+URL_FAVORECIDO_GITHUB = (
+    "https://github.com/wcdatamarketing-sketch/emendas-parlamentares"
+    "/releases/download/v1.0-data/EmendasParlamentares_PorFavorecido.csv"
+)
 
 # URL para arquivos até ~25 MB
 URL_DOWNLOAD = "https://drive.google.com/uc?export=download&id={file_id}"
@@ -262,6 +268,40 @@ def _df_convenios() -> pd.DataFrame | None:
 
 @st.cache_data(ttl=3600, show_spinner="Carregando base de favorecidos...")
 def _df_favorecido() -> pd.DataFrame | None:
+    """
+    Tenta baixar o CSV de favorecidos do GitHub Releases primeiro
+    (sem bloqueio de download). Cai no Google Drive como fallback.
+    """
+    # Tenta GitHub Releases primeiro
+    try:
+        resp = requests.get(URL_FAVORECIDO_GITHUB, timeout=180)
+        resp.raise_for_status()
+        df = None
+        for sep in [";", ","]:
+            for enc in ["latin-1", "cp1252", "utf-8-sig", "utf-8"]:
+                try:
+                    df = pd.read_csv(
+                        io.BytesIO(resp.content),
+                        sep=sep,
+                        encoding=enc,
+                        dtype=str,
+                        low_memory=False,
+                    )
+                    if len(df.columns) > 3:
+                        break
+                    df = None
+                except Exception:
+                    df = None
+            if df is not None:
+                break
+        if df is not None:
+            df.columns = df.columns.str.strip()
+            df = _aplicar_mapeamento(df, COLUNAS_FAVORECIDO)
+            return df
+    except Exception as e:
+        st.warning(f"⚠️ GitHub indisponível ({e}), tentando Drive...")
+
+    # Fallback: Google Drive
     df = _baixar_csv_drive(ID_EMENDAS_FAVORECIDO, grande=True)
     if df is not None:
         df = _aplicar_mapeamento(df, COLUNAS_FAVORECIDO)
