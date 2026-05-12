@@ -269,13 +269,18 @@ def _df_convenios() -> pd.DataFrame | None:
 @st.cache_data(ttl=3600, show_spinner="Carregando base de favorecidos...")
 def _df_favorecido() -> pd.DataFrame | None:
     """
-    Tenta baixar o CSV de favorecidos do GitHub Releases primeiro
-    (sem bloqueio de download). Cai no Google Drive como fallback.
+    Baixa o CSV de favorecidos do GitHub Releases.
+    Mostra status detalhado para diagnóstico.
     """
-    # Tenta GitHub Releases primeiro
     try:
-        resp = requests.get(URL_FAVORECIDO_GITHUB, timeout=180)
-        resp.raise_for_status()
+        st.info(f"📥 Baixando CSV de favorecidos do GitHub...")
+        resp = requests.get(URL_FAVORECIDO_GITHUB, timeout=180, allow_redirects=True)
+        st.info(f"📊 Status HTTP: {resp.status_code} | Tamanho: {len(resp.content):,} bytes")
+
+        if resp.status_code != 200:
+            st.error(f"❌ Erro HTTP {resp.status_code}: {resp.content[:200]}")
+            return None
+
         df = None
         for sep in [";", ","]:
             for enc in ["latin-1", "cp1252", "utf-8-sig", "utf-8"]:
@@ -288,24 +293,26 @@ def _df_favorecido() -> pd.DataFrame | None:
                         low_memory=False,
                     )
                     if len(df.columns) > 3:
+                        st.info(f"✅ CSV lido: {len(df)} linhas | {len(df.columns)} colunas | sep='{sep}' enc='{enc}'")
+                        st.info(f"📋 Colunas: {list(df.columns)[:5]}...")
                         break
                     df = None
-                except Exception:
+                except Exception as ex:
                     df = None
             if df is not None:
                 break
-        if df is not None:
-            df.columns = df.columns.str.strip()
-            df = _aplicar_mapeamento(df, COLUNAS_FAVORECIDO)
-            return df
-    except Exception as e:
-        st.warning(f"⚠️ GitHub indisponível ({e}), tentando Drive...")
 
-    # Fallback: Google Drive
-    df = _baixar_csv_drive(ID_EMENDAS_FAVORECIDO, grande=True)
-    if df is not None:
+        if df is None:
+            st.error("❌ Não foi possível ler o CSV com nenhuma combinação.")
+            return None
+
+        df.columns = df.columns.str.strip()
         df = _aplicar_mapeamento(df, COLUNAS_FAVORECIDO)
-    return df
+        return df
+
+    except Exception as e:
+        st.error(f"❌ Erro ao baixar favorecidos: {e}")
+        return None
 
 
 # ============================================================
