@@ -122,20 +122,20 @@ COLUNAS_CONVENIOS = {
 }
 
 COLUNAS_FAVORECIDO = {
-    "Código da Emenda":                   "codigoEmenda",
-    "Ano da Emenda":                      "ano",
-    "Tipo de Emenda":                     "tipoEmenda",
-    "Nome do Autor da Emenda":            "nomeAutor",
-    "Número da emenda":                   "numeroEmenda",
-    "Localidade de aplicação do recurso": "localidadeDoGasto",
-    "Município":                          "municipioFavorecido",
-    "UF":                                 "ufFavorecido",
-    "Nome Função":                        "funcao",
-    "Nome Subfunção":                     "subfuncao",
-    "Nome do Favorecido":                 "nomeFavorecido",
-    "Valor Empenhado":                    "valorEmpenhado",
-    "Valor Liquidado":                    "valorLiquidado",
-    "Valor Pago":                         "valorPago",
+    # Colunas reais confirmadas no CSV (diagnóstico 12/05/2026)
+    "Código da Emenda":       "codigoEmenda",
+    "Código do Autor da Emenda": "codigoAutor",
+    "Nome do Autor da Emenda": "nomeAutor",
+    "Número da emenda":       "numeroEmenda",
+    "Tipo de Emenda":         "tipoEmenda",
+    "Ano/Mês":                "ano",
+    "Código do Favorecido":   "codigoFavorecido",
+    "Favorecido":             "nomeFavorecido",
+    "Natureza Jurídica":      "naturezaJuridica",
+    "Tipo Favorecido":        "tipoFavorecido",
+    "UF Favorecido":          "ufFavorecido",
+    "Município Favorecido":   "municipioFavorecido",
+    "Valor Recebido":         "valorEmpenhado",
 }
 
 COLUNAS_VALOR = [
