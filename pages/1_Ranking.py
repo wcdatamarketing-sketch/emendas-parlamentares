@@ -1,6 +1,7 @@
 # ============================================================
 # pages/1_Ranking.py
 # Tela inicial — ranking geral de parlamentares por emendas
+# Permite selecionar múltiplos anos para análise combinada
 # ============================================================
 
 import streamlit as st
@@ -33,10 +34,7 @@ if "api_key" not in st.session_state:
 
 api_key = st.session_state.api_key
 
-# Botão temporário para forçar limpeza do cache
-if st.button("🔄 Limpar cache e recarregar"):
-    st.cache_data.clear()
-    st.rerun()
+
 # ============================================================
 # CABEÇALHO
 # ============================================================
@@ -47,7 +45,7 @@ st.markdown(
 )
 st.markdown(
     "Parlamentares e bancadas ordenados pelo total de emendas. "
-    "Use os filtros para refinar a busca."
+    "Selecione um ou mais anos para análise combinada."
 )
 st.divider()
 
@@ -56,10 +54,20 @@ st.divider()
 # FILTROS
 # ============================================================
 
-col_ano, col_tipo, col_local = st.columns(3)
+# Anos disponíveis na legislatura atual (2023-2026)
+ANOS_DISPONIVEIS = [2026, 2025, 2024, 2023]
+
+col_ano, col_tipo, col_local = st.columns([2, 2, 2])
 
 with col_ano:
-    ano = st.selectbox("Ano", options=[2024, 2023, 2022], index=0)
+    # multiselect permite escolher múltiplas opções
+    # default define quais já vêm marcados ao carregar a página
+    anos_selecionados = st.multiselect(
+        "Anos (selecione um ou mais)",
+        options=ANOS_DISPONIVEIS,
+        default=ANOS_DISPONIVEIS,  # todos marcados por padrão
+        help="Selecione um ou mais anos para análise combinada"
+    )
 
 with col_tipo:
     tipo_emenda = st.selectbox(
@@ -73,20 +81,46 @@ with col_local:
         placeholder="Ex: AMAPÁ, SÃO PAULO...",
     )
 
+# Valida se pelo menos um ano foi selecionado
+if not anos_selecionados:
+    st.warning("⚠️ Selecione pelo menos um ano para visualizar o ranking.")
+    st.stop()
+
 
 # ============================================================
-# BUSCA DOS DADOS
+# BUSCA DOS DADOS (múltiplos anos)
 # ============================================================
 
-with st.spinner("Buscando dados da API do Portal da Transparência..."):
-    try:
-        emendas_raw = cache_emendas_ranking(api_key, ano)
-    except Exception as e:
-        st.error(f"Erro detalhado: {str(e)}")
-        st.stop()
+# Ordena os anos selecionados em ordem crescente para a busca
+anos_ordenados = sorted(anos_selecionados)
 
-if not emendas_raw:
-    st.warning("Nenhum dado encontrado.")
+# Lista que vai acumular as emendas de todos os anos selecionados
+todas_emendas = []
+
+# Spinner com mensagem que será atualizada para cada ano
+with st.spinner(f"Buscando dados de {len(anos_ordenados)} ano(s)..."):
+
+    # Loop em cada ano selecionado
+    for ano_atual in anos_ordenados:
+        try:
+            # Busca os dados do ano específico
+            emendas_do_ano = cache_emendas_ranking(api_key, ano_atual)
+
+            # Adiciona o campo "ano" em cada registro para sabermos a origem
+            # (a API já retorna o campo "ano", mas garantimos aqui também)
+            for emenda in emendas_do_ano:
+                emenda["ano"] = ano_atual
+
+            # Junta com a lista geral
+            todas_emendas.extend(emendas_do_ano)
+
+        except Exception as e:
+            st.error(f"Erro ao buscar dados de {ano_atual}: {str(e)}")
+            st.stop()
+
+# Se nenhuma emenda retornou em nenhum ano
+if not todas_emendas:
+    st.warning("Nenhum dado encontrado nos anos selecionados.")
     st.stop()
 
 
@@ -94,9 +128,9 @@ if not emendas_raw:
 # PROCESSAMENTO DOS DADOS
 # ============================================================
 
-df = pd.DataFrame(emendas_raw)
+df = pd.DataFrame(todas_emendas)
 
-# Converte todas as colunas de valor para número
+# Converte os valores monetários (formato brasileiro → número)
 colunas_valor = [
     "valorEmpenhado", "valorLiquidado", "valorPago",
     "valorRestoInscrito", "valorRestoCancelado", "valorRestoPago"
@@ -104,9 +138,6 @@ colunas_valor = [
 
 for coluna in colunas_valor:
     if coluna in df.columns:
-        # Os valores vêm como string em formato brasileiro: "2.550,00"
-        # Precisamos converter: remover pontos (separador de milhar)
-        # e trocar a vírgula por ponto (separador decimal)
         df[coluna] = (
             df[coluna]
             .astype(str)
@@ -114,6 +145,7 @@ for coluna in colunas_valor:
             .str.replace(",", ".", regex=False)
         )
         df[coluna] = pd.to_numeric(df[coluna], errors="coerce").fillna(0)
+
 
 # ============================================================
 # APLICAÇÃO DOS FILTROS
@@ -134,11 +166,26 @@ if df.empty:
 # AGRUPAMENTO POR AUTOR
 # ============================================================
 
+# Função auxiliar para juntar os anos únicos em uma string
+# Exemplo: para os anos [2023, 2024, 2025] → "2023, 2024, 2025"
+def juntar_anos(series):
+    """
+    Recebe uma coluna do pandas com anos e retorna string
+    com os anos únicos ordenados.
+    """
+    # set() pega só valores únicos, sorted() ordena
+    anos_unicos = sorted(set(series))
+    # join junta os valores numa string separados por vírgula
+    return ", ".join(str(a) for a in anos_unicos)
+
+
+# Agrupa por autor e calcula totais consolidados de todos os anos
 ranking = df.groupby("nomeAutor").agg(
     total_empenhado=("valorEmpenhado", "sum"),
     total_pago=("valorPago", "sum"),
     quantidade=("valorEmpenhado", "count"),
     tipo=("tipoEmenda", "first"),
+    periodo=("ano", juntar_anos),  # nova coluna com os anos
 ).reset_index()
 
 ranking = ranking.sort_values("total_empenhado", ascending=False)
@@ -158,7 +205,11 @@ ranking.insert(0, "posicao", range(1, len(ranking) + 1))
 # CARDS DE RESUMO
 # ============================================================
 
-st.markdown("### 📈 Resumo do ano")
+# Card adicional mostrando o período selecionado
+periodo_label = ", ".join(str(a) for a in sorted(anos_selecionados))
+st.markdown(
+    f"### 📈 Resumo — Período: **{periodo_label}**"
+)
 
 c1, c2, c3, c4 = st.columns(4)
 
@@ -200,11 +251,12 @@ fig = px.bar(
     y="nomeAutor",
     orientation="h",
     color="tipo",
-    hover_data=["quantidade", "execucao"],
+    hover_data=["quantidade", "execucao", "periodo"],
     labels={
         "total_empenhado": "Empenhado (R$)",
         "nomeAutor": "Autor",
         "tipo": "Tipo de Emenda",
+        "periodo": "Período",
     },
 )
 
@@ -232,6 +284,7 @@ tabela = pd.DataFrame({
     "Pos.": ranking["posicao"],
     "Autor": ranking["nomeAutor"].apply(limpar_nome),
     "Tipo": ranking["tipo"],
+    "Período": ranking["periodo"],
     "Emendas": ranking["quantidade"],
     "Empenhado": ranking["total_empenhado"].apply(formatar_moeda),
     "Pago": ranking["total_pago"].apply(formatar_moeda),
@@ -251,6 +304,29 @@ csv = ranking.to_csv(index=False, encoding="utf-8-sig")
 st.download_button(
     label="⬇️ Baixar dados em CSV",
     data=csv,
-    file_name=f"ranking_emendas_{ano}.csv",
+    file_name=f"ranking_emendas_{'_'.join(str(a) for a in sorted(anos_selecionados))}.csv",
     mime="text/csv",
+)
+
+
+# ============================================================
+# RODAPÉ — ADMINISTRAÇÃO
+# ============================================================
+
+st.divider()
+
+# Botão discreto de limpar cache no rodapé (para administrador)
+col_rod_esq, col_rod_btn, col_rod_dir = st.columns([3, 2, 3])
+
+with col_rod_btn:
+    if st.button("🔄 Atualizar dados (limpar cache)", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+
+st.markdown(
+    "<p style='text-align:center; color:#999; font-size:0.85rem; margin-top:1rem;'>"
+    "Dados obtidos via API do Portal da Transparência — CGU. "
+    "Atualização automática a cada hora."
+    "</p>",
+    unsafe_allow_html=True
 )
