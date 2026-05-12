@@ -393,10 +393,13 @@ def carregar_top_favorecidos(
     # Filtro por autor — o CSV tem nomes em MAIÚSCULAS
     # Usa str.contains case-insensitive para tolerar variações de formatação
     if nome_autor and "nomeAutor" in df.columns:
-        # Pega apenas o primeiro sobrenome/nome principal para evitar mismatch
-        # Ex: "Erika Kokay" → busca "KOKAY" ou "ERIKA" no CSV
+        # Mostra amostra dos nomes no CSV para diagnóstico
+        amostra = df["nomeAutor"].dropna().unique()[:5].tolist()
+        st.info(f"🔍 Buscando '{nome_autor}' | Exemplos no CSV: {amostra}")
         nome_upper = nome_autor.strip().upper()
-        df = df[df["nomeAutor"].str.upper().str.contains(nome_upper, na=False, regex=False)]
+        df_filtrado = df[df["nomeAutor"].str.upper().str.contains(nome_upper, na=False, regex=False)]
+        st.info(f"📊 Linhas encontradas para '{nome_autor}': {len(df_filtrado)}")
+        df = df_filtrado
 
     elif sigla_partido:
         # CSV de favorecidos não tem coluna de partido.
