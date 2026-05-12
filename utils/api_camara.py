@@ -41,15 +41,17 @@ ID_LEGISLATURA_ATUAL = 57
 # FUNÇÕES INTERNAS
 # ============================================================
 
-def _get(endpoint: str, params: dict = None, url_completa: str = None) -> dict:
+def _get(url: str, params: dict = None) -> dict:
     """
     Faz uma requisição GET e retorna o JSON completo.
-    Aceita endpoint relativo ou URL completa (para paginação).
+    Aceita URL completa ou relativa ao BASE_URL.
     """
-    url = url_completa or f"{BASE_URL}{endpoint}"
+    # Se não começar com http, monta URL completa
+    if not url.startswith("http"):
+        url = f"{BASE_URL}{url}"
     resposta = requests.get(
         url,
-        params=params if not url_completa else None,
+        params=params,
         headers={"Accept": "application/json"},
         timeout=20,
     )
@@ -69,9 +71,10 @@ def _paginar(endpoint: str, params: dict, max_paginas: int = 20) -> list:
 
     while pagina < max_paginas:
         if proxima_url:
-            dados_json = _get(endpoint="", url_completa=proxima_url)
+            # URL completa da próxima página — passa sem params extras
+            dados_json = _get(proxima_url)
         else:
-            dados_json = _get(endpoint=endpoint, params=params)
+            dados_json = _get(endpoint, params=params)
 
         dados = dados_json.get("dados", [])
         if not dados:
