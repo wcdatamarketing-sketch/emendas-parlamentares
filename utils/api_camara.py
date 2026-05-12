@@ -176,22 +176,19 @@ def buscar_proposicoes_do_deputado(
     ano_fim: int = 2026,
 ) -> list:
     """
-    Busca todas as proposições apresentadas por um deputado
-    no período informado.
-
-    id_deputado: ID do deputado na API da Câmara
-    ano_inicio:  primeiro ano do período (padrão: 2023)
-    ano_fim:     último ano do período (padrão: 2026)
-    retorna:     lista de proposições com tipo, número, ementa e data
+    Busca todas as proposições apresentadas por um deputado.
+    Endpoint correto: /proposicoes?idDeputadoAutor={id}
+    (não existe /deputados/{id}/proposicoes)
     """
     return _paginar(
-        f"/deputados/{id_deputado}/proposicoes",
+        "/proposicoes",
         {
-            "dataInicio": f"{ano_inicio}-01-01",
-            "dataFim":    f"{ano_fim}-12-31",
-            "ordenarPor": "dataApresentacao",
-            "ordem":      "DESC",
-            "itens":      100,
+            "idDeputadoAutor": id_deputado,
+            "dataInicio":      f"{ano_inicio}-01-01",
+            "dataFim":         f"{ano_fim}-12-31",
+            "ordenarPor":      "dataApresentacao",
+            "ordem":           "DESC",
+            "itens":           100,
         },
         max_paginas=20,
     )
@@ -203,43 +200,31 @@ def buscar_leis_aprovadas(
     ano_fim: int = 2026,
 ) -> list:
     """
-    Busca proposições do deputado que foram aprovadas e
-    transformadas em norma jurídica (viraram lei).
-
-    Filtra por:
-    - Tipos legislativos que podem virar lei: PL, PLP, PEC, MPV
-    - Situação: "Transformada em norma jurídica" (codSituacao=1140)
-      ou tramitação encerrada com aprovação
-
-    id_deputado: ID do deputado
-    retorna:     lista de leis com ementa, número e data de aprovação
+    Busca proposições do deputado que viraram lei.
+    Usa codSituacao=1140 que é o código de "Transformada em norma jurídica"
+    na API da Câmara.
     """
-    # Busca todas as proposições do deputado no período
-    todas = buscar_proposicoes_do_deputado(id_deputado, ano_inicio, ano_fim)
-
-    # Filtra apenas os tipos que podem se tornar leis
-    tipos_lei = {"PL", "PLP", "PEC", "MPV", "PDL", "PDS"}
-
+    # Tipos que podem virar lei
+    tipos_lei = ["PL", "PLP", "PEC", "MPV", "PDL", "PDS"]
     leis = []
-    for prop in todas:
-        tipo = prop.get("siglaTipo", "")
-        if tipo not in tipos_lei:
+
+    for tipo in tipos_lei:
+        try:
+            resultado = _paginar(
+                "/proposicoes",
+                {
+                    "idDeputadoAutor": id_deputado,
+                    "siglaTipo":       tipo,
+                    "codSituacao":     1140,   # Transformada em norma jurídica
+                    "dataInicio":      f"{ano_inicio}-01-01",
+                    "dataFim":         f"{ano_fim}-12-31",
+                    "itens":           100,
+                },
+                max_paginas=5,
+            )
+            leis.extend(resultado)
+        except Exception:
             continue
-
-        # Verifica o status de tramitação
-        # A API retorna statusProposicao com descricaoSituacao
-        situacao = prop.get("statusProposicao", {})
-        desc_situacao = situacao.get("descricaoSituacao", "").lower()
-
-        if any(termo in desc_situacao for termo in [
-            "transformada em norma",
-            "transformado em norma",
-            "lei ordinária",
-            "lei complementar",
-            "promulgada",
-            "sancionada",
-        ]):
-            leis.append(prop)
 
     return leis
 
@@ -250,39 +235,31 @@ def buscar_relatorias_aprovadas(
     ano_fim: int = 2026,
 ) -> list:
     """
-    Busca proposições onde o deputado atuou como RELATOR
-    e que foram aprovadas.
-
-    A API da Câmara tem endpoint específico para relatorias:
-    /deputados/{id}/relatores
-
-    id_deputado: ID do deputado
-    retorna:     lista de relatorias com ementa e resultado
+    Busca proposições onde o deputado foi RELATOR e que viraram lei.
+    Endpoint: /proposicoes?idRelator={id}&codSituacao=1140
     """
-    try:
-        relatorias = _paginar(
-            f"/deputados/{id_deputado}/relatores",
-            {
-                "dataInicio": f"{ano_inicio}-01-01",
-                "dataFim":    f"{ano_fim}-12-31",
-                "itens":      100,
-            },
-            max_paginas=10,
-        )
-    except Exception:
-        # Endpoint pode não existir para todos os deputados
-        return []
+    tipos_lei = ["PL", "PLP", "PEC", "MPV", "PDL", "PDS"]
+    relatorias = []
 
-    # Filtra apenas as que foram aprovadas
-    aprovadas = []
-    for r in relatorias:
-        situacao = r.get("descricaoSituacao", "").lower()
-        if any(termo in situacao for termo in [
-            "aprovad", "transformad", "promulgad", "sancionad"
-        ]):
-            aprovadas.append(r)
+    for tipo in tipos_lei:
+        try:
+            resultado = _paginar(
+                "/proposicoes",
+                {
+                    "idRelator":   id_deputado,
+                    "siglaTipo":   tipo,
+                    "codSituacao": 1140,
+                    "dataInicio":  f"{ano_inicio}-01-01",
+                    "dataFim":     f"{ano_fim}-12-31",
+                    "itens":       100,
+                },
+                max_paginas=5,
+            )
+            relatorias.extend(resultado)
+        except Exception:
+            continue
 
-    return aprovadas
+    return relatorias
 
 
 # ============================================================
@@ -295,23 +272,51 @@ def buscar_votacoes_do_deputado(
     ano_fim: int = 2026,
 ) -> list:
     """
-    Busca como o deputado votou nas votações nominais do plenário.
+    Busca como o deputado votou nas votações nominais.
+    Endpoint correto: /votacoes com filtro de data,
+    depois busca os votos de cada votação que contém o deputado.
 
-    Retorna lista com cada votação: proposta, data e voto do deputado
-    (Sim, Não, Abstenção, Obstrução, Artigo 17, etc.)
+    Estratégia mais simples e que funciona na API v2:
+    busca /votacoes no período e para cada uma pega os votos
+    filtrando pelo deputado.
 
-    id_deputado: ID do deputado
-    retorna:     lista de votos individuais
+    Para evitar timeout, limita a 200 votações no período.
     """
-    return _paginar(
-        f"/deputados/{id_deputado}/votos",
+    # Passo 1: lista as votações do período
+    votacoes = _paginar(
+        "/votacoes",
         {
             "dataInicio": f"{ano_inicio}-01-01",
             "dataFim":    f"{ano_fim}-12-31",
+            "ordenarPor": "dataHoraRegistro",
+            "ordem":      "DESC",
             "itens":      100,
         },
-        max_paginas=30,
+        max_paginas=2,   # limita a ~200 votações para não travar
     )
+
+    votos_dep = []
+
+    # Passo 2: para cada votação, busca os votos e filtra pelo deputado
+    for votacao in votacoes:
+        id_votacao = votacao.get("id")
+        if not id_votacao:
+            continue
+        try:
+            votos = _get(f"/votacoes/{id_votacao}/votos").get("dados", [])
+            for voto in votos:
+                dep = voto.get("deputado_", {})
+                if str(dep.get("id", "")) == str(id_deputado):
+                    # Enriquece com dados da votação
+                    voto["idVotacao"]    = id_votacao
+                    voto["dataVotacao"]  = votacao.get("dataHoraRegistro", "")
+                    voto["descricao"]    = votacao.get("descricao", "")
+                    votos_dep.append(voto)
+                    break
+        except Exception:
+            continue
+
+    return votos_dep
 
 
 def buscar_votacoes_do_partido(
