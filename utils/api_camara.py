@@ -1,233 +1,384 @@
 # ============================================================
 # utils/api_camara.py
-# Responsável por buscar dados da API de Dados Abertos
-# da Câmara dos Deputados
+# Comunicação com a API de Dados Abertos da Câmara dos Deputados
 # Documentação: https://dadosabertos.camara.leg.br/api/v2
+#
+# FUNÇÕES DISPONÍVEIS:
+#
+# --- Deputados ---
+# buscar_deputados_legislatura()  → lista completa da 57ª legislatura
+# buscar_deputados()              → lista com filtros opcionais
+# buscar_deputado_por_id()        → detalhes de um deputado
+# buscar_deputado_por_nome()      → busca por nome parcial
+# buscar_partidos_legislatura()   → lista de partidos com deputados ativos
+#
+# --- Proposições e Leis ---
+# buscar_proposicoes_do_deputado()  → todas as proposições
+# buscar_leis_aprovadas()           → PLs aprovados que viraram lei
+#                                     onde o deputado foi autor ou relator
+#
+# --- Votações ---
+# buscar_votacoes_do_deputado()     → como o deputado votou (nominais)
+# buscar_votacoes_do_partido()      → votos agregados de um partido
 # ============================================================
 
-# requests para fazer as chamadas HTTP, igual ao arquivo anterior
 import requests
-
-# time para pausar entre requisições e não sobrecarregar a API
 import time
 
 
 # ============================================================
-# CONFIGURAÇÕES GERAIS
+# CONFIGURAÇÕES
 # ============================================================
 
-# URL base da API da Câmara — diferente da API do Portal da Transparência
-# essa API é pública e não exige chave de acesso
 BASE_URL = "https://dadosabertos.camara.leg.br/api/v2"
-
-# Pausa entre requisições em segundos
-# A API da Câmara não divulga limite oficial, mas 0.5s é uma boa prática
 PAUSA_ENTRE_REQUISICOES = 0.5
 
+# 57ª Legislatura = 2023-2027
+ID_LEGISLATURA_ATUAL = 57
+
 
 # ============================================================
-# FUNÇÕES AUXILIARES (internas do arquivo)
+# FUNÇÕES INTERNAS
 # ============================================================
 
-def _buscar_pagina(endpoint: str, parametros: dict) -> dict:
+def _get(endpoint: str, params: dict = None, url_completa: str = None) -> dict:
     """
-    Faz UMA requisição à API da Câmara e retorna a resposta completa.
-    
-    Diferente da API do Portal da Transparência, a API da Câmara
-    devolve um dicionário com dois campos:
-      - "dados": a lista de resultados
-      - "links": links para próxima página, página anterior, etc.
-    
-    endpoint:   caminho específico da API (ex: "/deputados")
-    parametros: filtros da busca
-    retorna:    dicionário com "dados" e "links"
+    Faz uma requisição GET e retorna o JSON completo.
+    Aceita endpoint relativo ou URL completa (para paginação).
     """
-    
-    # Monta a URL completa
-    url_completa = f"{BASE_URL}{endpoint}"
-    
-    # A API da Câmara não exige cabeçalho de autenticação
-    # mas pedimos a resposta em JSON pelo cabeçalho Accept
+    url = url_completa or f"{BASE_URL}{endpoint}"
     resposta = requests.get(
-        url_completa,
-        params=parametros,
+        url,
+        params=params if not url_completa else None,
         headers={"Accept": "application/json"},
-        timeout=15,
+        timeout=20,
     )
-    
-    # Lança erro se a API retornar código de erro
     resposta.raise_for_status()
-    
-    # Pausa para não sobrecarregar a API
     time.sleep(PAUSA_ENTRE_REQUISICOES)
-    
-    # Retorna o dicionário completo (com "dados" e "links")
     return resposta.json()
 
 
-def _buscar_todas_paginas(endpoint: str, parametros: dict, max_paginas: int = 10) -> list:
+def _paginar(endpoint: str, params: dict, max_paginas: int = 20) -> list:
     """
-    Pagina automaticamente pelos resultados da API da Câmara.
-    
-    A API da Câmara usa um sistema diferente de paginação:
-    em vez de número de página, ela devolve um link direto
-    para a próxima página no campo "links".
-    
-    endpoint:    caminho da API
-    parametros:  filtros da busca
-    max_paginas: limite de segurança
-    retorna:     lista completa com todos os registros
+    Busca todas as páginas de um endpoint paginado.
+    Segue o link "next" retornado pela API até acabar.
     """
-    
-    # Lista que vai acumular todos os resultados
-    todos_os_resultados = []
-    
-    # Faz uma cópia dos parâmetros para não modificar o original
-    params = parametros.copy()
-    
-    # Controla quantas páginas já buscamos
-    paginas_buscadas = 0
-    
-    # URL da próxima página — começa com a URL do endpoint normal
-    # e vai sendo atualizada conforme avançamos nas páginas
-    proxima_url = f"{BASE_URL}{endpoint}"
-    
-    # Loop que continua enquanto houver próxima página
-    while proxima_url and paginas_buscadas < max_paginas:
-        
-        # Faz a requisição para a URL atual
-        resposta = requests.get(
-            proxima_url,
-            params=params if paginas_buscadas == 0 else {},
-            # só manda os parâmetros na primeira página
-            # nas páginas seguintes a URL já vem completa
-            headers={"Accept": "application/json"},
-            timeout=15,
-        )
-        resposta.raise_for_status()
-        resultado = resposta.json()
-        
-        # Extrai a lista de dados do campo "dados"
-        dados = resultado.get("dados", [])
-        
-        # Se veio vazio, acabaram os resultados
+    resultados = []
+    proxima_url = None
+    pagina = 0
+
+    while pagina < max_paginas:
+        if proxima_url:
+            dados_json = _get(endpoint="", url_completa=proxima_url)
+        else:
+            dados_json = _get(endpoint=endpoint, params=params)
+
+        dados = dados_json.get("dados", [])
         if not dados:
             break
-        
-        # Adiciona os resultados dessa página na lista geral
-        todos_os_resultados.extend(dados)
-        paginas_buscadas += 1
-        
-        # Procura o link da próxima página no campo "links"
-        # a API devolve uma lista de links com rel="next", "first", "last"
-        proxima_url = None  # assume que não tem próxima
-        for link in resultado.get("links", []):
-            # "rel": "next" indica o link da próxima página
+
+        resultados.extend(dados)
+        pagina += 1
+
+        proxima_url = None
+        for link in dados_json.get("links", []):
             if link.get("rel") == "next":
                 proxima_url = link.get("href")
                 break
-        
-        # Pausa entre requisições
-        time.sleep(PAUSA_ENTRE_REQUISICOES)
-    
-    return todos_os_resultados
+
+        if not proxima_url:
+            break
+
+    return resultados
 
 
 # ============================================================
-# FUNÇÕES PÚBLICAS (usadas pelas telas do Streamlit)
+# DEPUTADOS
 # ============================================================
+
+def buscar_deputados_legislatura(id_legislatura: int = ID_LEGISLATURA_ATUAL) -> list:
+    """
+    Retorna a lista COMPLETA de deputados de uma legislatura.
+    Usada para filtrar a base CSV (remover senadores e outros).
+    Também alimenta os selects da tela de Comparativo.
+
+    id_legislatura: número da legislatura (padrão: 57 = 2023-2027)
+    retorna: lista com id, nome, partido, UF de cada deputado
+    """
+    return _paginar(
+        endpoint="/deputados",
+        params={
+            "idLegislatura": id_legislatura,
+            "ordenarPor": "nome",
+            "ordem": "ASC",
+            "itens": 100,
+        },
+        max_paginas=10,
+    )
+
 
 def buscar_deputados(uf: str = None, partido: str = None) -> list:
     """
-    Busca a lista de deputados federais ativos.
-    Pode filtrar por estado (UF) e/ou partido.
-    Será usada no campo de busca e no ranking.
-    
-    uf:      sigla do estado (ex: "DF", "SP") — opcional
-    partido: sigla do partido (ex: "PT", "PL") — opcional
-    retorna: lista de deputados com nome, partido, UF e foto
+    Lista deputados ativos com filtros opcionais de UF e partido.
     """
-    
-    # Monta os parâmetros — só inclui os que foram informados
-    parametros = {
-        "ordem": "ASC",       # ordem alfabética crescente
-        "ordenarPor": "nome", # ordena pelo nome
-    }
-    
-    # "if uf" só adiciona o parâmetro se o valor foi informado
-    # evita mandar filtros vazios para a API
+    params = {"ordenarPor": "nome", "ordem": "ASC", "itens": 100}
     if uf:
-        parametros["siglaUf"] = uf
+        params["siglaUf"] = uf
     if partido:
-        parametros["siglaPartido"] = partido
-    
-    return _buscar_todas_paginas(
-        endpoint="/deputados",
-        parametros=parametros,
-    )
+        params["siglaPartido"] = partido
+    return _paginar("/deputados", params)
 
 
 def buscar_deputado_por_id(id_deputado: int) -> dict:
     """
-    Busca os detalhes completos de um deputado pelo ID.
-    Retorna informações como escolaridade, site, redes sociais.
-    
-    id_deputado: número identificador do deputado na API da Câmara
-    retorna:     dicionário com todos os dados do deputado
+    Detalhes completos de um deputado pelo ID.
+    Retorna nome, partido, UF, foto, escolaridade, site etc.
     """
-    
-    resultado = _buscar_pagina(
-        endpoint=f"/deputados/{id_deputado}",
-        parametros={},
-    )
-    
-    # O campo "dados" aqui é um dicionário único, não uma lista
+    resultado = _get(f"/deputados/{id_deputado}")
     return resultado.get("dados", {})
-
-
-def buscar_proposicoes_do_deputado(id_deputado: int, ano: int = None) -> list:
-    """
-    Busca os projetos de lei e outras proposições apresentadas
-    por um deputado específico.
-    Será usada na tela de Perfil do Parlamentar.
-    
-    id_deputado: ID do deputado na API da Câmara
-    ano:         ano de referência — opcional
-    retorna:     lista de proposições com ementa e status
-    """
-    
-    parametros = {
-        "ordem": "DESC",          # mais recentes primeiro
-        "ordenarPor": "dataApresentacao",
-    }
-    
-    # Adiciona filtro de ano se foi informado
-    if ano:
-        parametros["dataInicio"] = f"{ano}-01-01"  # formato exigido: AAAA-MM-DD
-        parametros["dataFim"] = f"{ano}-12-31"
-    
-    return _buscar_todas_paginas(
-        endpoint=f"/deputados/{id_deputado}/proposicoes",
-        parametros=parametros,
-    )
 
 
 def buscar_deputado_por_nome(nome: str) -> list:
     """
-    Busca deputados pelo nome — útil para o campo de pesquisa.
-    Retorna todos os deputados cujo nome contém o texto buscado.
-    
-    nome:    texto para buscar no nome do deputado
-    retorna: lista de deputados encontrados
+    Busca deputados pelo nome (parcial).
+    Usada como fallback quando não temos o ID.
     """
-    
-    parametros = {
-        "nome": nome,         # a API filtra por parte do nome
-        "ordem": "ASC",
-        "ordenarPor": "nome",
-    }
-    
-    return _buscar_todas_paginas(
-        endpoint="/deputados",
-        parametros=parametros,
+    return _paginar(
+        "/deputados",
+        {"nome": nome, "ordenarPor": "nome", "ordem": "ASC"},
     )
+
+
+def buscar_partidos_legislatura(id_legislatura: int = ID_LEGISLATURA_ATUAL) -> list:
+    """
+    Retorna a lista de partidos que têm deputados na legislatura.
+    Usada para popular o select de partidos no Comparativo.
+
+    Retorna lista de strings com as siglas dos partidos,
+    ordenada alfabeticamente.
+    """
+    deputados = buscar_deputados_legislatura(id_legislatura)
+    partidos = sorted(set(
+        d.get("siglaPartido", "")
+        for d in deputados
+        if d.get("siglaPartido")
+    ))
+    return partidos
+
+
+# ============================================================
+# PROPOSIÇÕES E LEIS
+# ============================================================
+
+def buscar_proposicoes_do_deputado(
+    id_deputado: int,
+    ano_inicio: int = 2023,
+    ano_fim: int = 2026,
+) -> list:
+    """
+    Busca todas as proposições apresentadas por um deputado
+    no período informado.
+
+    id_deputado: ID do deputado na API da Câmara
+    ano_inicio:  primeiro ano do período (padrão: 2023)
+    ano_fim:     último ano do período (padrão: 2026)
+    retorna:     lista de proposições com tipo, número, ementa e data
+    """
+    return _paginar(
+        f"/deputados/{id_deputado}/proposicoes",
+        {
+            "dataInicio": f"{ano_inicio}-01-01",
+            "dataFim":    f"{ano_fim}-12-31",
+            "ordenarPor": "dataApresentacao",
+            "ordem":      "DESC",
+            "itens":      100,
+        },
+        max_paginas=20,
+    )
+
+
+def buscar_leis_aprovadas(
+    id_deputado: int,
+    ano_inicio: int = 2023,
+    ano_fim: int = 2026,
+) -> list:
+    """
+    Busca proposições do deputado que foram aprovadas e
+    transformadas em norma jurídica (viraram lei).
+
+    Filtra por:
+    - Tipos legislativos que podem virar lei: PL, PLP, PEC, MPV
+    - Situação: "Transformada em norma jurídica" (codSituacao=1140)
+      ou tramitação encerrada com aprovação
+
+    id_deputado: ID do deputado
+    retorna:     lista de leis com ementa, número e data de aprovação
+    """
+    # Busca todas as proposições do deputado no período
+    todas = buscar_proposicoes_do_deputado(id_deputado, ano_inicio, ano_fim)
+
+    # Filtra apenas os tipos que podem se tornar leis
+    tipos_lei = {"PL", "PLP", "PEC", "MPV", "PDL", "PDS"}
+
+    leis = []
+    for prop in todas:
+        tipo = prop.get("siglaTipo", "")
+        if tipo not in tipos_lei:
+            continue
+
+        # Verifica o status de tramitação
+        # A API retorna statusProposicao com descricaoSituacao
+        situacao = prop.get("statusProposicao", {})
+        desc_situacao = situacao.get("descricaoSituacao", "").lower()
+
+        if any(termo in desc_situacao for termo in [
+            "transformada em norma",
+            "transformado em norma",
+            "lei ordinária",
+            "lei complementar",
+            "promulgada",
+            "sancionada",
+        ]):
+            leis.append(prop)
+
+    return leis
+
+
+def buscar_relatorias_aprovadas(
+    id_deputado: int,
+    ano_inicio: int = 2023,
+    ano_fim: int = 2026,
+) -> list:
+    """
+    Busca proposições onde o deputado atuou como RELATOR
+    e que foram aprovadas.
+
+    A API da Câmara tem endpoint específico para relatorias:
+    /deputados/{id}/relatores
+
+    id_deputado: ID do deputado
+    retorna:     lista de relatorias com ementa e resultado
+    """
+    try:
+        relatorias = _paginar(
+            f"/deputados/{id_deputado}/relatores",
+            {
+                "dataInicio": f"{ano_inicio}-01-01",
+                "dataFim":    f"{ano_fim}-12-31",
+                "itens":      100,
+            },
+            max_paginas=10,
+        )
+    except Exception:
+        # Endpoint pode não existir para todos os deputados
+        return []
+
+    # Filtra apenas as que foram aprovadas
+    aprovadas = []
+    for r in relatorias:
+        situacao = r.get("descricaoSituacao", "").lower()
+        if any(termo in situacao for termo in [
+            "aprovad", "transformad", "promulgad", "sancionad"
+        ]):
+            aprovadas.append(r)
+
+    return aprovadas
+
+
+# ============================================================
+# VOTAÇÕES
+# ============================================================
+
+def buscar_votacoes_do_deputado(
+    id_deputado: int,
+    ano_inicio: int = 2023,
+    ano_fim: int = 2026,
+) -> list:
+    """
+    Busca como o deputado votou nas votações nominais do plenário.
+
+    Retorna lista com cada votação: proposta, data e voto do deputado
+    (Sim, Não, Abstenção, Obstrução, Artigo 17, etc.)
+
+    id_deputado: ID do deputado
+    retorna:     lista de votos individuais
+    """
+    return _paginar(
+        f"/deputados/{id_deputado}/votos",
+        {
+            "dataInicio": f"{ano_inicio}-01-01",
+            "dataFim":    f"{ano_fim}-12-31",
+            "itens":      100,
+        },
+        max_paginas=30,
+    )
+
+
+def buscar_votacoes_do_partido(
+    sigla_partido: str,
+    id_legislatura: int = ID_LEGISLATURA_ATUAL,
+    ano_inicio: int = 2023,
+    ano_fim: int = 2026,
+) -> dict:
+    """
+    Agrega os votos de TODOS os deputados de um partido.
+
+    Para cada votação nominal, conta quantos deputados votaram
+    Sim, Não, Abstenção etc.
+
+    sigla_partido:  sigla do partido (ex: "PT", "PL")
+    retorna:        dicionário com totais agregados:
+                    {
+                        "total_sim": N,
+                        "total_nao": N,
+                        "total_abstencao": N,
+                        "total_ausencia": N,
+                        "total_votos": N,
+                        "deputados": N,
+                    }
+    """
+    # Busca todos os deputados do partido na legislatura
+    deputados = _paginar(
+        "/deputados",
+        {
+            "idLegislatura": id_legislatura,
+            "siglaPartido":  sigla_partido,
+            "ordenarPor":    "nome",
+            "itens":         100,
+        },
+    )
+
+    if not deputados:
+        return {}
+
+    # Agrega os votos de todos os deputados do partido
+    totais = {
+        "total_sim":       0,
+        "total_nao":       0,
+        "total_abstencao": 0,
+        "total_ausencia":  0,
+        "total_votos":     0,
+        "deputados":       len(deputados),
+    }
+
+    for dep in deputados:
+        id_dep = dep.get("id")
+        if not id_dep:
+            continue
+        try:
+            votos = buscar_votacoes_do_deputado(id_dep, ano_inicio, ano_fim)
+            for voto in votos:
+                tipo_voto = voto.get("tipoVoto", "").strip().upper()
+                totais["total_votos"] += 1
+                if tipo_voto == "SIM":
+                    totais["total_sim"] += 1
+                elif tipo_voto == "NÃO" or tipo_voto == "NAO":
+                    totais["total_nao"] += 1
+                elif tipo_voto in ("ABSTENÇÃO", "ABSTENCAO"):
+                    totais["total_abstencao"] += 1
+                else:
+                    totais["total_ausencia"] += 1
+        except Exception:
+            continue
+
+    return totais
