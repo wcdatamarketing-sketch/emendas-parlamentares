@@ -37,24 +37,32 @@ def _buscar_pagina(endpoint: str, parametros: dict, api_key: str) -> list:
     return dados if dados else []
 
 
-def _buscar_todas_paginas(endpoint: str, parametros: dict, api_key: str, max_paginas: int = 20) -> list:
+def _buscar_todas_paginas(endpoint: str, parametros: dict, api_key: str, max_paginas: int = 30) -> list:
     """Pagina automaticamente até acabar os dados."""
     
     todos_os_resultados = []
     params = parametros.copy()
     
+    # Guarda o tamanho da primeira página para saber quando parar
+    tamanho_pagina_padrao = None
+    
     for numero_da_pagina in range(1, max_paginas + 1):
         params["pagina"] = numero_da_pagina
         dados_da_pagina = _buscar_pagina(endpoint, params, api_key)
         
+        # Se veio vazio, é fim dos dados
         if not dados_da_pagina:
             break
         
+        # Na primeira página descobrimos o tamanho padrão
+        if tamanho_pagina_padrao is None:
+            tamanho_pagina_padrao = len(dados_da_pagina)
+        
         todos_os_resultados.extend(dados_da_pagina)
         
-        # A API retorna 15 itens por página por padrão
-        # Se veio menos de 15, é a última página
-        if len(dados_da_pagina) < 15:
+        # Se a página atual veio com menos itens que o padrão
+        # significa que é a última página
+        if len(dados_da_pagina) < tamanho_pagina_padrao:
             break
     
     return todos_os_resultados
