@@ -322,6 +322,61 @@ def carregar_emendas_por_favorecido(api_key: str, nome_favorecido: str, ano: int
     return buscar_emendas_por_favorecido(api_key, nome_favorecido, ano)
 
 
+def carregar_top_favorecidos(
+    nome_autor: str = None,
+    sigla_partido: str = None,
+    anos: list = None,
+    top_n: int = 10,
+) -> list:
+    """
+    Retorna os top favorecidos (recebedores reais) por valor empenhado.
+    Usa o CSV de favorecidos (170 MB) que tem nomeFavorecido.
+
+    Filtra por nome do autor (deputado) OU por partido.
+    Retorna lista de dicts: [{"favorecido": str, "valor": float, "periodo": str}]
+    """
+    df = _df_favorecido()
+    if df is None or df.empty:
+        return []
+
+    # Filtro por anos
+    if anos and "ano" in df.columns:
+        df = df[df["ano"].astype(str).isin([str(a) for a in anos])]
+
+    # Filtro por autor ou partido
+    if nome_autor and "nomeAutor" in df.columns:
+        df = df[df["nomeAutor"].str.contains(nome_autor, case=False, na=False)]
+    elif sigla_partido and "partidoAutor" in df.columns:
+        df = df[df["partidoAutor"].str.upper() == sigla_partido.upper()]
+
+    if df.empty or "nomeFavorecido" not in df.columns:
+        return []
+
+    # Remove entradas sem favorecido identificado
+    df = df[~df["nomeFavorecido"].str.strip().isin(["", "Sem informação", "S/I"])]
+
+    # Agrega por favorecido
+    top = (
+        df.groupby("nomeFavorecido")
+        .agg(
+            valor=("valorEmpenhado", "sum"),
+            periodo=("ano", lambda s: ", ".join(sorted(set(s.astype(str))))),
+        )
+        .reset_index()
+        .sort_values("valor", ascending=False)
+        .head(top_n)
+    )
+
+    return [
+        {
+            "favorecido": row["nomeFavorecido"],
+            "valor":      row["valor"],
+            "periodo":    row["periodo"],
+        }
+        for _, row in top.iterrows()
+    ]
+
+
 def carregar_detalhe_emenda(api_key: str, codigo_emenda: str) -> dict:
     """
     Detalhe de uma emenda — cruza CSV principal + convênios.
