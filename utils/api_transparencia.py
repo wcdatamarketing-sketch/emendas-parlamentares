@@ -165,7 +165,7 @@ def buscar_emendas_por_autor(api_key: str, nome_autor: str, ano: int) -> list:
     
     # Chama a função que pagina automaticamente e retorna tudo
     return _buscar_todas_paginas(
-        endpoint="/emendas-parlamentares",
+        endpoint="/emendas",
         parametros=parametros,
         api_key=api_key,
     )
@@ -177,7 +177,7 @@ def buscar_emendas_ranking(api_key: str, ano: int) -> list:
         "pagina": 1,
     }
     return _buscar_todas_paginas(
-        endpoint="/emendas-parlamentares",
+        endpoint="/emendas",
         parametros=parametros,
         api_key=api_key,
     )
@@ -196,7 +196,7 @@ def buscar_detalhe_emenda(api_key: str, codigo_emenda: str) -> dict:
     # Esse endpoint retorna um único registro, não uma lista
     # por isso usamos _buscar_pagina diretamente (sem paginação)
     resultado = _buscar_pagina(
-        endpoint=f"/emendas-parlamentares/{codigo_emenda}",
+        endpoint=f"/emendas/{codigo_emenda}",
         parametros={},  # sem filtros adicionais — o código já identifica a emenda
         api_key=api_key,
     )
@@ -222,7 +222,7 @@ def buscar_emendas_por_municipio(api_key: str, municipio: str, ano: int) -> list
     }
     
     return _buscar_todas_paginas(
-        endpoint="/emendas-parlamentares",
+        endpoint="/emendas",
         parametros=parametros,
         api_key=api_key,
     )
@@ -245,7 +245,7 @@ def buscar_emendas_por_favorecido(api_key: str, nome_favorecido: str, ano: int) 
     }
     
     return _buscar_todas_paginas(
-        endpoint="/emendas-parlamentares",
+        endpoint="/emendas",
         parametros=parametros,
         api_key=api_key,
     )
