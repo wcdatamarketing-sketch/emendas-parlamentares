@@ -343,17 +343,54 @@ def carregar_top_favorecidos(
     if anos and "ano" in df.columns:
         df = df[df["ano"].astype(str).isin([str(a) for a in anos])]
 
-    # Filtro por autor ou partido
+    # Filtro por autor — o CSV tem nomes em MAIÚSCULAS
+    # Usa str.contains case-insensitive para tolerar variações de formatação
     if nome_autor and "nomeAutor" in df.columns:
-        df = df[df["nomeAutor"].str.contains(nome_autor, case=False, na=False)]
-    elif sigla_partido and "partidoAutor" in df.columns:
-        df = df[df["partidoAutor"].str.upper() == sigla_partido.upper()]
+        # Pega apenas o primeiro sobrenome/nome principal para evitar mismatch
+        # Ex: "Erika Kokay" → busca "KOKAY" ou "ERIKA" no CSV
+        nome_upper = nome_autor.strip().upper()
+        df = df[df["nomeAutor"].str.upper().str.contains(nome_upper, na=False, regex=False)]
+
+    elif sigla_partido:
+        # CSV de favorecidos não tem coluna de partido.
+        # Cruzamos com o CSV principal para pegar os códigos de emenda do partido,
+        # depois filtramos o CSV de favorecidos por esses códigos.
+        df_principal = _df_principal()
+        if df_principal is None or "codigoEmenda" not in df_principal.columns:
+            return []
+
+        col_partido_princ = next(
+            (c for c in ["partidoAutor", "siglaPartido"] if c in df_principal.columns),
+            None,
+        )
+        if not col_partido_princ:
+            return []
+
+        # Filtra CSV principal pelo partido e anos para pegar os códigos
+        df_p = df_principal.copy()
+        if anos:
+            df_p = df_p[df_p["ano"].astype(str).isin([str(a) for a in anos])]
+        df_p = df_p[df_p[col_partido_princ].str.upper() == sigla_partido.upper()]
+
+        if df_p.empty:
+            return []
+
+        codigos = set(df_p["codigoEmenda"].dropna().unique())
+
+        if "codigoEmenda" not in df.columns:
+            return []
+
+        df = df[df["codigoEmenda"].isin(codigos)]
 
     if df.empty or "nomeFavorecido" not in df.columns:
         return []
 
     # Remove entradas sem favorecido identificado
-    df = df[~df["nomeFavorecido"].str.strip().isin(["", "Sem informação", "S/I"])]
+    df = df[~df["nomeFavorecido"].str.strip().isin(["", "Sem informação", "S/I", "SEM INFORMACAO"])]
+    df = df[df["valorEmpenhado"] > 0]
+
+    if df.empty:
+        return []
 
     # Agrega por favorecido
     top = (
