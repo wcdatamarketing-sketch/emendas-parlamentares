@@ -75,47 +75,14 @@ st.divider()
 
 
 # ============================================================
-# FILTROS
+# BUSCA DOS DADOS — carrega tudo primeiro para popular os filtros
 # ============================================================
 
-ANOS_DISPONIVEIS = [2026, 2025, 2024, 2023]
-
-col_ano, col_tipo, col_local = st.columns([2, 2, 2])
-
-with col_ano:
-    anos_selecionados = st.multiselect(
-        "Anos (selecione um ou mais)",
-        options=ANOS_DISPONIVEIS,
-        default=ANOS_DISPONIVEIS,
-        help="Selecione um ou mais anos para análise combinada"
-    )
-
-with col_tipo:
-    tipo_emenda = st.selectbox(
-        "Tipo de emenda",
-        options=["Todas", "Individual", "Bancada", "Comissão", "Relator"],
-    )
-
-with col_local:
-    localidade = st.text_input(
-        "Localidade do gasto",
-        placeholder="Ex: AMAPÁ, SÃO PAULO...",
-    )
-
-if not anos_selecionados:
-    st.warning("⚠️ Selecione pelo menos um ano para visualizar o ranking.")
-    st.stop()
-
-
-# ============================================================
-# BUSCA DOS DADOS
-# ============================================================
-
-anos_ordenados = sorted(anos_selecionados)
+ANOS_DISPONIVEIS = [2023, 2024, 2025, 2026]
 todas_emendas = []
 
-with st.spinner(f"Buscando dados de {len(anos_ordenados)} ano(s)..."):
-    for ano_atual in anos_ordenados:
+with st.spinner("Carregando base de emendas..."):
+    for ano_atual in ANOS_DISPONIVEIS:
         try:
             emendas_do_ano = cache_emendas_ranking(api_key, ano_atual)
             for emenda in emendas_do_ano:
@@ -126,43 +93,135 @@ with st.spinner(f"Buscando dados de {len(anos_ordenados)} ano(s)..."):
             st.stop()
 
 if not todas_emendas:
-    st.warning("Nenhum dado encontrado nos anos selecionados.")
+    st.warning("Nenhum dado encontrado.")
     st.stop()
 
+df_base = pd.DataFrame(todas_emendas)
 
-# ============================================================
-# PROCESSAMENTO
-# ============================================================
-
-df = pd.DataFrame(todas_emendas)
-
-colunas_valor = [
+# Converte valores monetários logo após carregar
+colunas_valor_base = [
     "valorEmpenhado", "valorLiquidado", "valorPago",
     "valorRestoInscrito", "valorRestoCancelado", "valorRestoPago"
 ]
-for coluna in colunas_valor:
-    if coluna in df.columns:
-        df[coluna] = (
-            df[coluna].astype(str)
+for coluna in colunas_valor_base:
+    if coluna in df_base.columns:
+        df_base[coluna] = (
+            df_base[coluna].astype(str)
             .str.replace(".", "", regex=False)
             .str.replace(",", ".", regex=False)
         )
-        df[coluna] = pd.to_numeric(df[coluna], errors="coerce").fillna(0)
+        df_base[coluna] = pd.to_numeric(df_base[coluna], errors="coerce").fillna(0)
 
-# Aplica tipo resumido no DataFrame bruto também (para filtro funcionar)
-if "tipoEmenda" in df.columns:
-    df["tipoResumido"] = df["tipoEmenda"].apply(resumir_tipo)
+if "tipoEmenda" in df_base.columns:
+    df_base["tipoResumido"] = df_base["tipoEmenda"].apply(resumir_tipo)
+
+# Listas para os selects — extraídas da base real
+lista_ufs = sorted([
+    u for u in df_base["ufFavorecido"].dropna().unique()
+    if str(u).strip() not in ("", "Sem informação", "S/I")
+]) if "ufFavorecido" in df_base.columns else []
+
+lista_autores = sorted([
+    limpar_nome(a) for a in df_base["nomeAutor"].dropna().unique()
+    if str(a).strip() not in ("", "Sem informação", "S/I")
+]) if "nomeAutor" in df_base.columns else []
 
 
 # ============================================================
 # FILTROS
 # ============================================================
 
+# --- Linha 1: Anos como checkboxes ---
+st.markdown("**Anos**")
+col_2023, col_2024, col_2025, col_2026, col_espaco = st.columns([1, 1, 1, 1, 4])
+with col_2023:
+    ano_2023 = st.checkbox("2023", value=True)
+with col_2024:
+    ano_2024 = st.checkbox("2024", value=True)
+with col_2025:
+    ano_2025 = st.checkbox("2025", value=True)
+with col_2026:
+    ano_2026 = st.checkbox("2026", value=True)
+
+anos_selecionados = [
+    a for a, sel in [(2023, ano_2023), (2024, ano_2024), (2025, ano_2025), (2026, ano_2026)]
+    if sel
+]
+
+if not anos_selecionados:
+    st.warning("⚠️ Selecione pelo menos um ano.")
+    st.stop()
+
+# --- Linha 2: demais filtros ---
+col_tipo, col_autor, col_uf, col_mun = st.columns([2, 3, 2, 3])
+
+with col_tipo:
+    tipo_emenda = st.selectbox(
+        "Tipo de emenda",
+        options=["Todas", "Individual", "Bancada", "Comissão", "Relator"],
+    )
+
+with col_autor:
+    autor_sel = st.selectbox(
+        "Autor",
+        options=["Todos"] + lista_autores,
+    )
+
+with col_uf:
+    uf_sel = st.selectbox(
+        "UF",
+        options=["Todas"] + lista_ufs,
+    )
+
+with col_mun:
+    # Municípios filtrados pela UF selecionada
+    if uf_sel != "Todas" and "ufFavorecido" in df_base.columns and "municipioFavorecido" in df_base.columns:
+        lista_muns = sorted([
+            m for m in df_base[df_base["ufFavorecido"] == uf_sel]["municipioFavorecido"].dropna().unique()
+            if str(m).strip() not in ("", "Sem informação", "S/I")
+        ])
+    elif "municipioFavorecido" in df_base.columns:
+        lista_muns = sorted([
+            m for m in df_base["municipioFavorecido"].dropna().unique()
+            if str(m).strip() not in ("", "Sem informação", "S/I")
+        ])
+    else:
+        lista_muns = []
+
+    mun_sel = st.selectbox(
+        "Município",
+        options=["Todos"] + lista_muns,
+    )
+
+
+# ============================================================
+# PROCESSAMENTO
+# ============================================================
+
+# ============================================================
+# APLICAÇÃO DOS FILTROS SOBRE df_base
+# ============================================================
+
+df = df_base.copy()
+
+# Ano
+df = df[df["ano"].astype(str).isin([str(a) for a in anos_selecionados])]
+
+# Tipo de emenda
 if tipo_emenda != "Todas" and "tipoResumido" in df.columns:
     df = df[df["tipoResumido"] == tipo_emenda]
 
-if localidade and "localidadeDoGasto" in df.columns:
-    df = df[df["localidadeDoGasto"].str.contains(localidade, case=False, na=False)]
+# Autor
+if autor_sel != "Todos" and "nomeAutor" in df.columns:
+    df = df[df["nomeAutor"].apply(limpar_nome) == autor_sel]
+
+# UF
+if uf_sel != "Todas" and "ufFavorecido" in df.columns:
+    df = df[df["ufFavorecido"] == uf_sel]
+
+# Município
+if mun_sel != "Todos" and "municipioFavorecido" in df.columns:
+    df = df[df["municipioFavorecido"] == mun_sel]
 
 if df.empty:
     st.warning("Nenhum resultado com os filtros aplicados.")
