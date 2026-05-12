@@ -56,17 +56,21 @@ def formatar_moeda_resumida(valor) -> str:
     except (TypeError, ValueError):
         return "R$ —"
     
-    # Bilhões — divide por 1 bilhão e formata com 1 casa decimal
+    # Trilhões
+    if valor_float >= 1_000_000_000_000:
+        return f"R$ {valor_float / 1_000_000_000_000:.1f} tri".replace(".", ",")
+
+    # Bilhões
     if valor_float >= 1_000_000_000:
-        return f"R$ {valor_float / 1_000_000_000:.1f} bi"
-    
-    # Milhões — divide por 1 milhão
+        return f"R$ {valor_float / 1_000_000_000:.1f} bi".replace(".", ",")
+
+    # Milhões
     if valor_float >= 1_000_000:
-        return f"R$ {valor_float / 1_000_000:.1f} mi"
-    
-    # Mil — divide por 1000
+        return f"R$ {valor_float / 1_000_000:.1f} mi".replace(".", ",")
+
+    # Mil
     if valor_float >= 1_000:
-        return f"R$ {valor_float / 1_000:.1f} mil"
+        return f"R$ {valor_float / 1_000:.1f} mil".replace(".", ",")
     
     # Valores menores que mil — mostra completo
     return formatar_moeda(valor_float)
