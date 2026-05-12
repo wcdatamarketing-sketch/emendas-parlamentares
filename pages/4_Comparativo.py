@@ -15,6 +15,7 @@ from utils.cache import (
     cache_relatorias_aprovadas,
     cache_votacoes_do_deputado,
     cache_votacoes_do_partido,
+    cache_top_favorecidos,
 )
 from utils.formatters import (
     formatar_moeda,
@@ -296,23 +297,26 @@ def grafico_funcao(df: pd.DataFrame, cor: str) -> None:
     st.plotly_chart(fig, use_container_width=True)
 
 
-def grafico_favorecidos(df: pd.DataFrame, cor: str) -> None:
-    """Top 8 favorecidos por valor empenhado."""
-    col = next((c for c in ["nomeFavorecido", "municipioFavorecido",
-                             "localidadeDoGasto"] if c in df.columns), None)
-    if not col or df.empty:
-        st.info("Sem dados de favorecidos.")
-        return
-    top = (
-        df.groupby(col)["valorEmpenhado"].sum()
-        .reset_index()
-        .sort_values("valorEmpenhado", ascending=False)
-        .head(8)
-    )
-    top.columns = ["Favorecido", "Empenhado"]
-    top = top[~top["Favorecido"].str.strip().isin(["", "Sem informação", "S/I"])]
-    if top.empty:
-        st.info("Sem dados.")
+def grafico_favorecidos(
+    cor: str,
+    nome_autor: str = None,
+    sigla_partido: str = None,
+    anos: list = None,
+) -> None:
+    """
+    Top 10 favorecidos reais (nome da entidade recebedora).
+    Busca do CSV de favorecidos (170 MB) via cache.
+    """
+    with st.spinner("Carregando favorecidos..."):
+        dados = cache_top_favorecidos(
+            nome_autor=nome_autor,
+            sigla_partido=sigla_partido,
+            anos=tuple(sorted(anos)) if anos else None,
+            top_n=10,
+        )
+
+    if not dados:
+        st.info("Sem dados de favorecidos disponíveis.")
         return
 
     def _fmt(v):
@@ -322,20 +326,28 @@ def grafico_favorecidos(df: pd.DataFrame, cor: str) -> None:
             return f"R$ {v/1_000_000:.1f} mi".replace(".", ",")
         return f"R$ {v/1_000:.0f} mil"
 
-    top["fmt"] = top["Empenhado"].apply(_fmt)
+    top = pd.DataFrame(dados)
+    top["fmt"] = top["valor"].apply(_fmt)
+    # Trunca nomes muito longos para não poluir o gráfico
+    top["nome_curto"] = top["favorecido"].str[:45]
 
     fig = px.bar(
-        top, x="Empenhado", y="Favorecido", orientation="h",
+        top.sort_values("valor"),
+        x="valor", y="nome_curto", orientation="h",
         text="fmt", color_discrete_sequence=[cor],
-        labels={"Empenhado": "", "Favorecido": ""},
+        labels={"valor": "", "nome_curto": ""},
+        hover_data={"periodo": True, "favorecido": True, "fmt": False,
+                    "valor": False, "nome_curto": False},
     )
     fig.update_layout(
         xaxis={"visible": False}, yaxis={"categoryorder": "total ascending"},
-        height=320, plot_bgcolor="white", paper_bgcolor="white",
-        margin=dict(l=5, r=80, t=5, b=5), showlegend=False,
+        height=380, plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=5, r=90, t=5, b=5), showlegend=False,
     )
-    fig.update_traces(textposition="outside",
-                      hovertemplate="<b>%{y}</b><br>%{text}<extra></extra>")
+    fig.update_traces(
+        textposition="outside",
+        hovertemplate="<b>%{customdata[1]}</b><br>%{text}<br>Período: %{customdata[0]}<extra></extra>",
+    )
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -491,11 +503,17 @@ col_fava, col_favb = st.columns(2)
 
 with col_fava:
     st.markdown(f"**🔵 {label_a}**")
-    grafico_favorecidos(df_a, "#2e6da4")
+    if not modo_partido:
+        grafico_favorecidos("#2e6da4", nome_autor=label_a, anos=anos_selecionados)
+    else:
+        grafico_favorecidos("#2e6da4", sigla_partido=label_a, anos=anos_selecionados)
 
 with col_favb:
     st.markdown(f"**🔴 {label_b}**")
-    grafico_favorecidos(df_b, "#c0392b")
+    if not modo_partido:
+        grafico_favorecidos("#c0392b", nome_autor=label_b, anos=anos_selecionados)
+    else:
+        grafico_favorecidos("#c0392b", sigla_partido=label_b, anos=anos_selecionados)
 
 st.divider()
 
