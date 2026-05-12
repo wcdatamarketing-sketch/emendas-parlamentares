@@ -15,6 +15,7 @@ from utils.data_loader import (
     carregar_emendas_por_municipio,
     carregar_emendas_por_favorecido,
     carregar_detalhe_emenda,
+    carregar_top_favorecidos,
 )
 
 from utils.api_camara import (
@@ -58,6 +59,22 @@ def cache_emendas_por_municipio(api_key: str, municipio: str, ano: int) -> list:
 @st.cache_data(ttl=3600)
 def cache_emendas_por_favorecido(api_key: str, nome_favorecido: str, ano: int) -> list:
     return carregar_emendas_por_favorecido(api_key, nome_favorecido, ano)
+
+
+@st.cache_data(ttl=3600)
+def cache_top_favorecidos(
+    nome_autor: str = None,
+    sigla_partido: str = None,
+    anos: tuple = None,
+    top_n: int = 10,
+) -> list:
+    """Top favorecidos por deputado ou partido. anos como tuple para ser hashável no cache."""
+    return carregar_top_favorecidos(
+        nome_autor=nome_autor,
+        sigla_partido=sigla_partido,
+        anos=list(anos) if anos else None,
+        top_n=top_n,
+    )
 
 
 # ============================================================
