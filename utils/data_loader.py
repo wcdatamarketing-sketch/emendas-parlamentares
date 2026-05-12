@@ -273,12 +273,9 @@ def _df_favorecido() -> pd.DataFrame | None:
     Mostra status detalhado para diagnóstico.
     """
     try:
-        st.info(f"📥 Baixando CSV de favorecidos do GitHub...")
         resp = requests.get(URL_FAVORECIDO_GITHUB, timeout=180, allow_redirects=True)
-        st.info(f"📊 Status HTTP: {resp.status_code} | Tamanho: {len(resp.content):,} bytes")
 
         if resp.status_code != 200:
-            st.error(f"❌ Erro HTTP {resp.status_code}: {resp.content[:200]}")
             return None
 
         df = None
@@ -293,8 +290,6 @@ def _df_favorecido() -> pd.DataFrame | None:
                         low_memory=False,
                     )
                     if len(df.columns) > 3:
-                        st.info(f"✅ CSV lido: {len(df)} linhas | {len(df.columns)} colunas | sep='{sep}' enc='{enc}'")
-                        st.info(f"📋 Colunas: {list(df.columns)[:5]}...")
                         break
                     df = None
                 except Exception as ex:
@@ -303,7 +298,6 @@ def _df_favorecido() -> pd.DataFrame | None:
                 break
 
         if df is None:
-            st.error("❌ Não foi possível ler o CSV com nenhuma combinação.")
             return None
 
         df.columns = df.columns.str.strip()
@@ -311,7 +305,7 @@ def _df_favorecido() -> pd.DataFrame | None:
         return df
 
     except Exception as e:
-        st.error(f"❌ Erro ao baixar favorecidos: {e}")
+        st.warning(f"⚠️ Erro ao baixar favorecidos: {e}")
         return None
 
 
@@ -392,20 +386,16 @@ def carregar_top_favorecidos(
 
     # Filtro por autor — o CSV tem nomes em MAIÚSCULAS
     # Usa str.contains case-insensitive para tolerar variações de formatação
-    if nome_autor and "nomeAutor" in df.columns:
-        # Mostra amostra dos nomes no CSV para diagnóstico
-        amostra = df["nomeAutor"].dropna().unique()[:5].tolist()
-        st.info(f"🔍 Buscando '{nome_autor}' | Exemplos no CSV: {amostra}")
+    if nome_autor:
         nome_upper = nome_autor.strip().upper()
-        df_filtrado = df[df["nomeAutor"].str.upper().str.contains(nome_upper, na=False, regex=False)]
-        st.info(f"📊 Linhas encontradas para '{nome_autor}': {len(df_filtrado)}")
-        st.info(f"📋 Colunas após filtro: {list(df_filtrado.columns)}")
-        if "nomeFavorecido" in df_filtrado.columns:
-            amostra_fav = df_filtrado["nomeFavorecido"].dropna().unique()[:3].tolist()
-            st.info(f"🏢 Exemplos de favorecidos: {amostra_fav}")
-        else:
-            st.error(f"❌ Coluna nomeFavorecido NÃO encontrada! Colunas: {list(df_filtrado.columns)}")
-        df = df_filtrado
+        # Tenta coluna mapeada primeiro, depois nome original
+        col_autor = next(
+            (c for c in ["nomeAutor", "Nome do Autor da Emenda"]
+             if c in df.columns),
+            None,
+        )
+        if col_autor:
+            df = df[df[col_autor].str.upper().str.contains(nome_upper, na=False, regex=False)]
 
     elif sigla_partido:
         # CSV de favorecidos não tem coluna de partido.
@@ -438,22 +428,55 @@ def carregar_top_favorecidos(
 
         df = df[df["codigoEmenda"].isin(codigos)]
 
-    if df.empty or "nomeFavorecido" not in df.columns:
+    # Detecta colunas — mapeadas ou originais
+    col_fav = next(
+        (c for c in ["nomeFavorecido", "Favorecido"] if c in df.columns), None
+    )
+    col_val = next(
+        (c for c in ["valorEmpenhado", "Valor Recebido"] if c in df.columns), None
+    )
+    col_ano = next(
+        (c for c in ["ano", "Ano/Mês"] if c in df.columns), None
+    )
+
+    if df.empty or not col_fav or not col_val:
         return []
 
-    # Remove entradas sem favorecido identificado
-    df = df[~df["nomeFavorecido"].str.strip().isin(["", "Sem informação", "S/I", "SEM INFORMACAO"])]
-    df = df[df["valorEmpenhado"] > 0]
+    # Converte valor para número se necessário
+    if not pd.api.types.is_numeric_dtype(df[col_val]):
+        df[col_val] = df[col_val].astype(str).str.replace(".", "", regex=False).str.replace(",", ".", regex=False)
+        df[col_val] = pd.to_numeric(df[col_val], errors="coerce").fillna(0)
+
+    # Remove entradas sem favorecido
+    df = df[~df[col_fav].astype(str).str.strip().isin(["", "Sem informação", "S/I"])]
+    df = df[df[col_val] > 0]
 
     if df.empty:
         return []
 
+    # Extrai nome limpo do favorecido (remove código numérico do início se houver)
+    def _limpar_favorecido(nome):
+        s = str(nome).strip()
+        # Remove padrão "123456789 NOME" — código no início
+        partes = s.split(" ", 1)
+        if len(partes) == 2 and partes[0].replace(".", "").isdigit():
+            return partes[1].strip()
+        return s
+
+    df["_fav_limpo"] = df[col_fav].apply(_limpar_favorecido)
+
+    # Extrai ano se necessário
+    if col_ano:
+        df["_ano"] = df[col_ano].astype(str).str[:4]
+    else:
+        df["_ano"] = "?"
+
     # Agrega por favorecido
     top = (
-        df.groupby("nomeFavorecido")
+        df.groupby("_fav_limpo")
         .agg(
-            valor=("valorEmpenhado", "sum"),
-            periodo=("ano", lambda s: ", ".join(sorted(set(s.astype(str))))),
+            valor=(col_val, "sum"),
+            periodo=("_ano", lambda s: ", ".join(sorted(set(s)))),
         )
         .reset_index()
         .sort_values("valor", ascending=False)
@@ -462,7 +485,7 @@ def carregar_top_favorecidos(
 
     return [
         {
-            "favorecido": row["nomeFavorecido"],
+            "favorecido": row["_fav_limpo"],
             "valor":      row["valor"],
             "periodo":    row["periodo"],
         }
