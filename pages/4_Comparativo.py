@@ -361,10 +361,10 @@ def painel_votacoes(votos: list, label: str) -> None:
             contagem["OUTROS"] += 1
     total = sum(contagem.values())
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("✅ Sim",       f"{contagem['SIM']} ({contagem['SIM']/total*100:.0f}%)" if total else "0")
-    c2.metric("❌ Não",       f"{contagem['NÃO']} ({contagem['NÃO']/total*100:.0f}%)" if total else "0")
-    c3.metric("➖ Abstenção", f"{contagem['ABSTENÇÃO']} ({contagem['ABSTENÇÃO']/total*100:.0f}%)" if total else "0")
-    c4.metric("📋 Total",     str(total))
+    c1.markdown(_card("✅ Sim",       f"{contagem['SIM']} ({contagem['SIM']/total*100:.0f}%)" if total else "0"), unsafe_allow_html=True)
+    c2.markdown(_card("❌ Não",       f"{contagem['NÃO']} ({contagem['NÃO']/total*100:.0f}%)" if total else "0"), unsafe_allow_html=True)
+    c3.markdown(_card("➖ Abstenção", f"{contagem['ABSTENÇÃO']} ({contagem['ABSTENÇÃO']/total*100:.0f}%)" if total else "0"), unsafe_allow_html=True)
+    c4.markdown(_card("📋 Total",     str(total)), unsafe_allow_html=True)
 
 
 # ============================================================
@@ -434,13 +434,23 @@ st.markdown("<br>", unsafe_allow_html=True)
 st.markdown("### 📊 Emendas")
 col_m1, col_m2 = st.columns(2)
 
+def _card(titulo: str, valor: str) -> str:
+    """Gera HTML de um card de métrica com fonte reduzida."""
+    return (
+        f"<div style='background:#f0f4f8;border:1px solid #d0dce8;"
+        f"border-radius:8px;padding:10px 14px;text-align:center'>"
+        f"<div style='color:#666;font-size:0.72rem;margin-bottom:4px'>{titulo}</div>"
+        f"<div style='color:#1a3a5c;font-size:1.05rem;font-weight:600'>{valor}</div>"
+        f"</div>"
+    )
+
 def _cards_metricas(res: dict, label: str, emoji: str) -> None:
     pct = f"{res['execucao']:.1f}%".replace(".", ",")
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric(f"{emoji} Emendas",   res["quantidade"])
-    c2.metric("💼 Empenhado", formatar_moeda_resumida(res["empenhado"]))
-    c3.metric("💸 Pago",      formatar_moeda_resumida(res["pago"]))
-    c4.metric("✅ Execução",  pct)
+    c1.markdown(_card(f"{emoji} Emendas",  str(res["quantidade"])),        unsafe_allow_html=True)
+    c2.markdown(_card("💼 Empenhado", formatar_moeda_resumida(res["empenhado"])), unsafe_allow_html=True)
+    c3.markdown(_card("💸 Pago",      formatar_moeda_resumida(res["pago"])),      unsafe_allow_html=True)
+    c4.markdown(_card("✅ Execução",  pct),                                       unsafe_allow_html=True)
 
 with col_m1:
     st.markdown(f"**🔵 {label_a}**")
@@ -560,9 +570,9 @@ else:
         sim = votos.get("total_sim", 0)
         nao = votos.get("total_nao", 0)
         abst = votos.get("total_abstencao", 0)
-        c1.metric("✅ Sim",       f"{sim} ({sim/total*100:.0f}%)"   if total else "0")
-        c2.metric("❌ Não",       f"{nao} ({nao/total*100:.0f}%)"   if total else "0")
-        c3.metric("➖ Abstenção", f"{abst} ({abst/total*100:.0f}%)" if total else "0")
+        c1.markdown(_card("✅ Sim",       f"{sim} ({sim/total*100:.0f}%)"   if total else "0"), unsafe_allow_html=True)
+        c2.markdown(_card("❌ Não",       f"{nao} ({nao/total*100:.0f}%)"   if total else "0"), unsafe_allow_html=True)
+        c3.markdown(_card("➖ Abstenção", f"{abst} ({abst/total*100:.0f}%)" if total else "0"), unsafe_allow_html=True)
 
     with col_va:
         st.markdown(f"**🔵 {label_a}**")
