@@ -290,112 +290,80 @@ with col_tabela:
 
 
 # --------------------------------------------------------
-# COLUNA DIREITA — top 10 destinatários
+# COLUNA DIREITA — distribuição por área temática (função)
 # --------------------------------------------------------
+
+def _grafico_funcao(df_fonte: pd.DataFrame, titulo: str, subtitulo: str):
+    """Monta gráfico de barras horizontais por área temática."""
+    if "funcao" not in df_fonte.columns:
+        st.info("Dados de área temática não disponíveis.")
+        return
+
+    por_funcao = (
+        df_fonte.groupby("funcao")["valorEmpenhado"]
+        .sum()
+        .reset_index()
+        .sort_values("valorEmpenhado", ascending=False)
+        .head(10)
+    )
+    por_funcao.columns = ["Área", "Empenhado"]
+    # Remove entradas vazias ou sem informação
+    por_funcao = por_funcao[
+        ~por_funcao["Área"].str.strip().isin(["", "Sem informação", "S/I"])
+    ]
+
+    if por_funcao.empty:
+        st.info("Sem dados de área temática para exibir.")
+        return
+
+    st.markdown(f"### {titulo}")
+    st.caption(subtitulo)
+
+    fig = px.bar(
+        por_funcao,
+        x="Empenhado",
+        y="Área",
+        orientation="h",
+        color="Empenhado",
+        color_continuous_scale="Blues",
+        labels={"Empenhado": "R$ Empenhado", "Área": ""},
+    )
+    fig.update_layout(
+        yaxis={"categoryorder": "total ascending"},
+        height=420,
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        coloraxis_showscale=False,
+        margin=dict(l=10, r=10, t=10, b=10),
+    )
+    fig.update_traces(
+        hovertemplate="<b>%{y}</b><br>R$ %{x:,.0f}<extra></extra>"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
 
 with col_destinos:
 
-    # Verifica se o usuário clicou em alguma linha
     linhas_selecionadas = evento.selection.get("rows", [])
 
     if linhas_selecionadas:
-        # Usuário clicou numa linha — pega o índice e o nome do parlamentar
         idx = linhas_selecionadas[0]
         nome_parlamentar = ranking.iloc[idx]["nomeAutor"]
         nome_exibir = limpar_nome(nome_parlamentar)
 
-        st.markdown(f"### 📍 Destinos — {nome_exibir}")
-        st.caption("Top 10 municípios por valor empenhado")
-
-        # Filtra o DataFrame bruto pelo parlamentar selecionado
         df_parl = df[df["nomeAutor"] == nome_parlamentar].copy()
-
-        col_destino = None
-        for c in ["municipioFavorecido", "localidadeDoGasto"]:
-            if c in df_parl.columns:
-                col_destino = c
-                break
-
-        if col_destino:
-            destinos = (
-                df_parl.groupby(col_destino)["valorEmpenhado"]
-                .sum()
-                .reset_index()
-                .sort_values("valorEmpenhado", ascending=False)
-                .head(10)
-            )
-            destinos.columns = ["Destino", "Empenhado"]
-            destinos = destinos[destinos["Destino"].str.strip() != ""]
-
-            fig_dest = px.bar(
-                destinos,
-                x="Empenhado",
-                y="Destino",
-                orientation="h",
-                color="Empenhado",
-                color_continuous_scale="Blues",
-                labels={"Empenhado": "R$ Empenhado", "Destino": ""},
-            )
-            fig_dest.update_layout(
-                yaxis={"categoryorder": "total ascending"},
-                height=420,
-                plot_bgcolor="white",
-                paper_bgcolor="white",
-                coloraxis_showscale=False,
-                margin=dict(l=10, r=10, t=10, b=10),
-            )
-            fig_dest.update_traces(
-                hovertemplate="<b>%{y}</b><br>R$ %{x:,.0f}<extra></extra>"
-            )
-            st.plotly_chart(fig_dest, use_container_width=True)
-        else:
-            st.info("Dados de destino não disponíveis para este parlamentar.")
+        _grafico_funcao(
+            df_parl,
+            titulo=f"🎯 {nome_exibir}",
+            subtitulo="Distribuição por área temática — valor empenhado",
+        )
 
     else:
-        # Nenhuma linha selecionada — mostra top 10 geral
-        st.markdown("### 🗺️ Top 10 destinos geral")
-        st.caption("Municípios que mais receberam emendas no período")
-
-        col_destino = None
-        for c in ["municipioFavorecido", "localidadeDoGasto"]:
-            if c in df.columns:
-                col_destino = c
-                break
-
-        if col_destino:
-            destinos_geral = (
-                df.groupby(col_destino)["valorEmpenhado"]
-                .sum()
-                .reset_index()
-                .sort_values("valorEmpenhado", ascending=False)
-                .head(10)
-            )
-            destinos_geral.columns = ["Destino", "Empenhado"]
-            destinos_geral = destinos_geral[
-                destinos_geral["Destino"].str.strip() != ""
-            ]
-
-            fig_geral = px.bar(
-                destinos_geral,
-                x="Empenhado",
-                y="Destino",
-                orientation="h",
-                color="Empenhado",
-                color_continuous_scale="Blues",
-                labels={"Empenhado": "R$ Empenhado", "Destino": ""},
-            )
-            fig_geral.update_layout(
-                yaxis={"categoryorder": "total ascending"},
-                height=420,
-                plot_bgcolor="white",
-                paper_bgcolor="white",
-                coloraxis_showscale=False,
-                margin=dict(l=10, r=10, t=10, b=10),
-            )
-            fig_geral.update_traces(
-                hovertemplate="<b>%{y}</b><br>R$ %{x:,.0f}<extra></extra>"
-            )
-            st.plotly_chart(fig_geral, use_container_width=True)
+        _grafico_funcao(
+            df,
+            titulo="🎯 Áreas temáticas — geral",
+            subtitulo="Top 10 áreas por valor empenhado no período",
+        )
 
 st.divider()
 
