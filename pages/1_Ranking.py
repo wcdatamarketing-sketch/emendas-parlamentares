@@ -33,7 +33,10 @@ if "api_key" not in st.session_state:
 
 api_key = st.session_state.api_key
 
-
+# Botão temporário para forçar limpeza do cache
+if st.button("🔄 Limpar cache e recarregar"):
+    st.cache_data.clear()
+    st.rerun()
 # ============================================================
 # CABEÇALHO
 # ============================================================
