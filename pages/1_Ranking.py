@@ -120,17 +120,6 @@ if "tipoEmenda" in df_base.columns:
     df_base["tipoResumido"] = df_base["tipoEmenda"].apply(resumir_tipo)
 
 # Listas para os selects — extraídas da base real
-lista_ufs = sorted([
-    u for u in df_base["ufFavorecido"].dropna().unique()
-    if str(u).strip() not in ("", "Sem informação", "S/I")
-]) if "ufFavorecido" in df_base.columns else []
-
-lista_autores = sorted([
-    limpar_nome(a) for a in df_base["nomeAutor"].dropna().unique()
-    if str(a).strip() not in ("", "Sem informação", "S/I")
-]) if "nomeAutor" in df_base.columns else []
-
-
 # ============================================================
 # FILTROS
 # ============================================================
@@ -156,6 +145,23 @@ if not anos_selecionados:
     st.warning("⚠️ Selecione pelo menos um ano.")
     st.stop()
 
+# Filtra df_base pelos anos selecionados ANTES de popular os selects
+# Isso garante que autores, UFs e municípios reflitam só o período escolhido
+df_anos = df_base[
+    df_base["ano"].astype(str).isin([str(a) for a in anos_selecionados])
+].copy()
+
+# Popula listas dos selects a partir do período filtrado
+lista_autores = sorted([
+    limpar_nome(a) for a in df_anos["nomeAutor"].dropna().unique()
+    if str(a).strip() not in ("", "Sem informação", "S/I")
+]) if "nomeAutor" in df_anos.columns else []
+
+lista_ufs = sorted([
+    u for u in df_anos["ufFavorecido"].dropna().unique()
+    if str(u).strip() not in ("", "Sem informação", "S/I")
+]) if "ufFavorecido" in df_anos.columns else []
+
 # --- Linha 2: demais filtros ---
 col_tipo, col_autor, col_uf, col_mun = st.columns([2, 3, 2, 3])
 
@@ -178,15 +184,11 @@ with col_uf:
     )
 
 with col_mun:
-    # Municípios filtrados pela UF selecionada
-    if uf_sel != "Todas" and "ufFavorecido" in df_base.columns and "municipioFavorecido" in df_base.columns:
+    # Municípios filtrados pela UF e anos selecionados
+    df_mun_base = df_anos[df_anos["ufFavorecido"] == uf_sel] if uf_sel != "Todas" else df_anos
+    if "municipioFavorecido" in df_mun_base.columns:
         lista_muns = sorted([
-            m for m in df_base[df_base["ufFavorecido"] == uf_sel]["municipioFavorecido"].dropna().unique()
-            if str(m).strip() not in ("", "Sem informação", "S/I")
-        ])
-    elif "municipioFavorecido" in df_base.columns:
-        lista_muns = sorted([
-            m for m in df_base["municipioFavorecido"].dropna().unique()
+            m for m in df_mun_base["municipioFavorecido"].dropna().unique()
             if str(m).strip() not in ("", "Sem informação", "S/I")
         ])
     else:
