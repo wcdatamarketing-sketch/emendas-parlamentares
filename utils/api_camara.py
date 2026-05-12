@@ -272,47 +272,67 @@ def buscar_votacoes_do_deputado(
     ano_fim: int = 2026,
 ) -> list:
     """
-    Busca como o deputado votou nas votações nominais.
-    Endpoint correto: /votacoes com filtro de data,
-    depois busca os votos de cada votação que contém o deputado.
+    Busca os votos nominais de um deputado usando os arquivos
+    CSV anuais disponibilizados pela Câmara.
 
-    Estratégia mais simples e que funciona na API v2:
-    busca /votacoes no período e para cada uma pega os votos
-    filtrando pelo deputado.
+    URL: dadosabertos.camara.leg.br/arquivos/votacoesVotos/csv/votacoesVotos-{ano}.csv
 
-    Para evitar timeout, limita a 200 votações no período.
+    Cada linha do CSV contém o id do deputado e seu voto.
+    Filtramos as linhas do deputado solicitado.
+
+    Retorna lista de dicionários com tipoVoto e idVotacao.
     """
-    # Passo 1: lista as votações do período
-    votacoes = _paginar(
-        "/votacoes",
-        {
-            "dataInicio": f"{ano_inicio}-01-01",
-            "dataFim":    f"{ano_fim}-12-31",
-            "ordenarPor": "dataHoraRegistro",
-            "ordem":      "DESC",
-            "itens":      100,
-        },
-        max_paginas=2,   # limita a ~200 votações para não travar
+    import io
+    import pandas as pd
+
+    URL_CSV = (
+        "https://dadosabertos.camara.leg.br/arquivos/votacoesVotos"
+        "/csv/votacoesVotos-{ano}.csv"
     )
 
     votos_dep = []
 
-    # Passo 2: para cada votação, busca os votos e filtra pelo deputado
-    for votacao in votacoes:
-        id_votacao = votacao.get("id")
-        if not id_votacao:
-            continue
+    for ano in range(ano_inicio, ano_fim + 1):
         try:
-            votos = _get(f"/votacoes/{id_votacao}/votos").get("dados", [])
-            for voto in votos:
-                dep = voto.get("deputado_", {})
-                if str(dep.get("id", "")) == str(id_deputado):
-                    # Enriquece com dados da votação
-                    voto["idVotacao"]    = id_votacao
-                    voto["dataVotacao"]  = votacao.get("dataHoraRegistro", "")
-                    voto["descricao"]    = votacao.get("descricao", "")
-                    votos_dep.append(voto)
-                    break
+            resp = requests.get(
+                URL_CSV.format(ano=ano),
+                timeout=60,
+                headers={"Accept": "text/csv"},
+            )
+            resp.raise_for_status()
+
+            df = pd.read_csv(
+                io.BytesIO(resp.content),
+                sep=";",
+                encoding="utf-8",
+                dtype=str,
+                low_memory=False,
+            )
+
+            # Coluna com ID do deputado pode ser idDeputado ou deputado_id
+            col_id = next(
+                (c for c in df.columns if "idDeputado" in c or "deputado_id" in c.lower()),
+                None,
+            )
+            col_voto = next(
+                (c for c in df.columns if "tipoVoto" in c or "voto" in c.lower()),
+                None,
+            )
+
+            if not col_id or not col_voto:
+                continue
+
+            df_dep = df[df[col_id].astype(str) == str(id_deputado)]
+
+            for _, row in df_dep.iterrows():
+                votos_dep.append({
+                    "tipoVoto":   row.get(col_voto, ""),
+                    "idVotacao":  row.get("idVotacao", row.get("id", "")),
+                    "ano":        ano,
+                })
+
+            time.sleep(0.3)
+
         except Exception:
             continue
 
@@ -326,64 +346,83 @@ def buscar_votacoes_do_partido(
     ano_fim: int = 2026,
 ) -> dict:
     """
-    Agrega os votos de TODOS os deputados de um partido.
+    Agrega os votos de todos os deputados de um partido
+    usando os CSVs anuais de votos da Câmara.
 
-    Para cada votação nominal, conta quantos deputados votaram
-    Sim, Não, Abstenção etc.
-
-    sigla_partido:  sigla do partido (ex: "PT", "PL")
-    retorna:        dicionário com totais agregados:
-                    {
-                        "total_sim": N,
-                        "total_nao": N,
-                        "total_abstencao": N,
-                        "total_ausencia": N,
-                        "total_votos": N,
-                        "deputados": N,
-                    }
+    Filtra diretamente pelo partido no CSV — muito mais rápido
+    que iterar por deputado individualmente.
     """
-    # Busca todos os deputados do partido na legislatura
-    deputados = _paginar(
-        "/deputados",
-        {
-            "idLegislatura": id_legislatura,
-            "siglaPartido":  sigla_partido,
-            "ordenarPor":    "nome",
-            "itens":         100,
-        },
+    import io
+    import pandas as pd
+
+    URL_CSV = (
+        "https://dadosabertos.camara.leg.br/arquivos/votacoesVotos"
+        "/csv/votacoesVotos-{ano}.csv"
     )
 
-    if not deputados:
-        return {}
-
-    # Agrega os votos de todos os deputados do partido
     totais = {
         "total_sim":       0,
         "total_nao":       0,
         "total_abstencao": 0,
         "total_ausencia":  0,
         "total_votos":     0,
-        "deputados":       len(deputados),
+        "deputados":       0,
     }
 
-    for dep in deputados:
-        id_dep = dep.get("id")
-        if not id_dep:
-            continue
+    ids_dep = set()
+
+    for ano in range(ano_inicio, ano_fim + 1):
         try:
-            votos = buscar_votacoes_do_deputado(id_dep, ano_inicio, ano_fim)
-            for voto in votos:
-                tipo_voto = voto.get("tipoVoto", "").strip().upper()
+            resp = requests.get(URL_CSV.format(ano=ano), timeout=60)
+            resp.raise_for_status()
+
+            df = pd.read_csv(
+                io.BytesIO(resp.content),
+                sep=";",
+                encoding="utf-8",
+                dtype=str,
+                low_memory=False,
+            )
+
+            # Coluna de partido
+            col_partido = next(
+                (c for c in df.columns if "siglaPartido" in c or "partido" in c.lower()),
+                None,
+            )
+            col_voto = next(
+                (c for c in df.columns if "tipoVoto" in c or c.lower() == "voto"),
+                None,
+            )
+            col_id = next(
+                (c for c in df.columns if "idDeputado" in c or "deputado_id" in c.lower()),
+                None,
+            )
+
+            if not col_partido or not col_voto:
+                continue
+
+            df_part = df[
+                df[col_partido].str.upper() == sigla_partido.upper()
+            ]
+
+            if col_id is not None:
+                ids_dep.update(df_part[col_id].dropna().unique())
+
+            for voto in df_part[col_voto].str.upper().fillna(""):
                 totais["total_votos"] += 1
-                if tipo_voto == "SIM":
+                if voto == "SIM":
                     totais["total_sim"] += 1
-                elif tipo_voto == "NÃO" or tipo_voto == "NAO":
+                elif voto in ("NÃO", "NAO"):
                     totais["total_nao"] += 1
-                elif tipo_voto in ("ABSTENÇÃO", "ABSTENCAO"):
+                elif voto in ("ABSTENÇÃO", "ABSTENCAO"):
                     totais["total_abstencao"] += 1
                 else:
                     totais["total_ausencia"] += 1
+
+            time.sleep(0.3)
+
         except Exception:
             continue
 
+    totais["deputados"] = len(ids_dep) if ids_dep else totais["deputados"]
     return totais
