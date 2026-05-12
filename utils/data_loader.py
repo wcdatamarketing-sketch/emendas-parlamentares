@@ -399,6 +399,12 @@ def carregar_top_favorecidos(
         nome_upper = nome_autor.strip().upper()
         df_filtrado = df[df["nomeAutor"].str.upper().str.contains(nome_upper, na=False, regex=False)]
         st.info(f"📊 Linhas encontradas para '{nome_autor}': {len(df_filtrado)}")
+        st.info(f"📋 Colunas após filtro: {list(df_filtrado.columns)}")
+        if "nomeFavorecido" in df_filtrado.columns:
+            amostra_fav = df_filtrado["nomeFavorecido"].dropna().unique()[:3].tolist()
+            st.info(f"🏢 Exemplos de favorecidos: {amostra_fav}")
+        else:
+            st.error(f"❌ Coluna nomeFavorecido NÃO encontrada! Colunas: {list(df_filtrado.columns)}")
         df = df_filtrado
 
     elif sigla_partido:
