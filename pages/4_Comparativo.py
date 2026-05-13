@@ -567,7 +567,6 @@ if not modo_partido:
 st.markdown("### 🗳️ Como votou nas principais pautas")
 
 if not modo_partido:
-    # Busca os votos de cada deputado nas votações curadas
     with st.spinner("Buscando votações relevantes..."):
         votos_rel_a = buscar_votos_relevantes_deputado(id_a) if id_a else []
         votos_rel_b = buscar_votos_relevantes_deputado(id_b) if id_b else []
@@ -575,37 +574,63 @@ if not modo_partido:
     if not votos_rel_a and not votos_rel_b:
         st.info("Dados de votações não disponíveis para o período selecionado.")
     else:
-        # Monta tabela comparativa lado a lado
-        # Filtra pelo período selecionado
         anos_str = [str(a) for a in anos_selecionados]
 
-        df_vot_a = pd.DataFrame(votos_rel_a)
-        df_vot_b = pd.DataFrame(votos_rel_b)
+        def _tabela_votos(votos: list, label: str, cor: str) -> None:
+            """Monta tabela individual de votações de um parlamentar."""
+            if not votos:
+                st.info("Sem dados de votações.")
+                return
 
-        if not df_vot_a.empty and not df_vot_b.empty:
-            # Filtra pelos anos selecionados
-            df_vot_a = df_vot_a[df_vot_a["ano"].astype(str).isin(anos_str)]
-            df_vot_b = df_vot_b[df_vot_b["ano"].astype(str).isin(anos_str)]
+            df = pd.DataFrame(votos)
+            df = df[df["ano"].astype(str).isin(anos_str)].copy()
 
-            # Mescla pelo tema
-            df_comp = df_vot_a[["tema", "status", "resultado", "voto", "ano"]].merge(
-                df_vot_b[["tema", "voto"]],
-                on="tema",
-                suffixes=("_a", "_b"),
-            )
+            if df.empty:
+                st.info("Sem votações no período selecionado.")
+                return
 
-            # Renomeia colunas
-            df_comp.columns = ["Pauta", "Status", "Resultado", f"🔵 {label_a}", "Ano", f"🔴 {label_b}"]
-            df_comp = df_comp.sort_values("Ano")
+            df = df.sort_values("ano")
+
+            # Monta tabela exibível
+            tabela = pd.DataFrame({
+                "Ano":       df["ano"].astype(str),
+                "Pauta":     df["tema"],
+                "Voto":      df["voto"],
+                "Resultado": df["status"] + " " + df["resultado"],
+            })
 
             st.dataframe(
-                df_comp[["Ano", "Pauta", "Status", f"🔵 {label_a}", f"🔴 {label_b}", "Resultado"]],
+                tabela,
                 use_container_width=True,
                 hide_index=True,
-                height=500,
+                height=450,
+                column_config={
+                    "Ano":       st.column_config.TextColumn(width="small"),
+                    "Voto":      st.column_config.TextColumn(width="medium"),
+                    "Pauta":     st.column_config.TextColumn(width="large"),
+                    "Resultado": st.column_config.TextColumn(width="medium"),
+                },
             )
-        else:
-            st.info("Votações relevantes não encontradas para o período selecionado.")
+
+        col_va, col_vb = st.columns(2)
+
+        with col_va:
+            st.markdown(
+                f"<div style='background:#e8f0fa;padding:8px 12px;"
+                f"border-radius:6px;border-left:4px solid #2e6da4;"
+                f"margin-bottom:8px'><b>🔵 {label_a}</b></div>",
+                unsafe_allow_html=True,
+            )
+            _tabela_votos(votos_rel_a, label_a, "#2e6da4")
+
+        with col_vb:
+            st.markdown(
+                f"<div style='background:#faeaea;padding:8px 12px;"
+                f"border-radius:6px;border-left:4px solid #c0392b;"
+                f"margin-bottom:8px'><b>🔴 {label_b}</b></div>",
+                unsafe_allow_html=True,
+            )
+            _tabela_votos(votos_rel_b, label_b, "#c0392b")
 
 else:
     # Modo partido — mostra totais agregados
