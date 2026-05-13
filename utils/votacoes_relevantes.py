@@ -259,7 +259,7 @@ URL_VOTOS_CSV = (
 # DOWNLOAD E CACHE DOS CSVs
 # ============================================================
 
-@st.cache_data(ttl=86400, show_spinner=False)
+@st.cache_data(ttl=1, show_spinner=False)
 def _baixar_votacoes_ano(ano: int) -> pd.DataFrame | None:
     """Baixa e cacheia o CSV de votações de um ano."""
     try:
@@ -283,7 +283,7 @@ def _baixar_votacoes_ano(ano: int) -> pd.DataFrame | None:
     return None
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
+@st.cache_data(ttl=1, show_spinner=False)
 def _baixar_votos_ano(ano: int) -> pd.DataFrame | None:
     """Baixa e cacheia o CSV de votos de um ano."""
     try:
@@ -319,7 +319,7 @@ def _detectar_coluna(df: pd.DataFrame, candidatos: list) -> str | None:
     return None
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
+@st.cache_data(ttl=1, show_spinner=False)
 def _buscar_id_proposicao(sigla: str, numero: str, ano_prop: int) -> str | None:
     """Busca o ID da proposição na API da Câmara."""
     try:
@@ -340,6 +340,13 @@ def _buscar_id_proposicao(sigla: str, numero: str, ano_prop: int) -> str | None:
 # ============================================================
 # BUSCA DO idVotacao — NÍVEL 0 + 3 DINÂMICOS
 # ============================================================
+
+def _log(msg, chave):
+    k = f"_{chave}_{abs(hash(msg))%9999}"
+    if k not in st.session_state:
+        st.session_state[k] = True
+        st.caption(f"🔍 {msg}")
+
 
 def _selecionar_votacao_principal(df: pd.DataFrame, col_id: str) -> str | None:
     """
@@ -373,7 +380,7 @@ def _selecionar_votacao_principal(df: pd.DataFrame, col_id: str) -> str | None:
     return str(df.iloc[-1][col_id]).strip()
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
+@st.cache_data(ttl=1, show_spinner=False)
 def buscar_id_votacao(
     sigla: str,
     numero: str,
@@ -408,14 +415,19 @@ def buscar_id_votacao(
     if not col_id_vot:
         return None
 
+    chave = f"vlog_{sigla}{numero}{ano_vot}"
+
     # --- Nível 1 — idProposicao no campo idProposicao ---
     if id_prop and col_prop_id:
         mask = df_vot[col_prop_id].astype(str).str.strip() == str(id_prop).strip()
         resultado = df_vot[mask]
-        if not resultado.empty and col_descr:
+        if not resultado.empty:
             id_vot = _selecionar_votacao_principal(resultado, col_id_vot)
             if id_vot:
+                _log(f"N1 {sigla}{numero}: {id_prop} -> {id_vot} ({len(resultado)} linhas)", chave)
                 return id_vot
+        else:
+            _log(f"N1 {sigla}{numero}: prop={id_prop} sem match no CSV {ano_vot}", chave)
 
     # --- Nível 2 — idProposicao na URI ---
     if id_prop and col_prop_uri:
@@ -423,22 +435,28 @@ def buscar_id_votacao(
             str(id_prop), regex=False, na=False
         )
         resultado = df_vot[mask]
-        if not resultado.empty and col_descr:
+        if not resultado.empty:
             id_vot = _selecionar_votacao_principal(resultado, col_id_vot)
             if id_vot:
+                _log(f"N2-URI {sigla}{numero}: {id_prop} -> {id_vot} ({len(resultado)} linhas)", chave)
                 return id_vot
+        else:
+            _log(f"N2-URI {sigla}{numero}: prop={id_prop} sem match na URI", chave)
 
     # --- Nível 3 — regex SIGLA+NUM na descricao ---
     if col_descr:
-        padrao = rf"(?i){re.escape(sigla)}\s*[./-]?\s*{re.escape(numero)}"
+        padrao = rf"(?i){re.escape(sigla)}[\s./-]{{0,2}}{re.escape(numero)}"
         mask = df_vot[col_descr].astype(str).str.contains(padrao, regex=True, na=False)
         resultado = df_vot[mask]
         if not resultado.empty:
             id_vot = _selecionar_votacao_principal(resultado, col_id_vot)
             if id_vot:
+                _log(f"N3 {sigla}{numero} -> {id_vot} ({len(resultado)} linhas)", chave)
                 return id_vot
+        else:
+            _log(f"N3 {sigla}{numero}: sem match na descricao", chave)
 
-    # --- Nível 4 — API /votacoes (fallback remoto) ---
+        # --- Nível 4 — API /votacoes (fallback remoto) ---
     if id_prop:
         try:
             r = requests.get(
@@ -512,7 +530,7 @@ def buscar_voto_deputado(id_deputado: int, id_votacao: str, ano_vot: int) -> str
 # ENTRY POINT PRINCIPAL
 # ============================================================
 
-@st.cache_data(ttl=3600, show_spinner="Buscando votações relevantes...")
+@st.cache_data(ttl=1, show_spinner="Buscando votações relevantes...")
 def buscar_votos_relevantes_deputado(id_deputado: int) -> list:
     """
     Retorna os votos de um deputado nas votações relevantes curadas.
