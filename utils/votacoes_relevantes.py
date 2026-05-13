@@ -367,9 +367,16 @@ def buscar_voto_deputado(id_deputado: int, id_votacao: str, ano_vot: int) -> str
 
     # Colunas do CSV votacoesVotos — nomes reais da API da Câmara
     # idVotacao, idDeputado (ou deputado_id), tipoVoto (ou voto)
+    # Log temporário para ver colunas reais do CSV de votos
+    if "votos_cols_log" not in st.session_state:
+        st.session_state["votos_cols_log"] = True
+        st.info(f"📋 CSV votos colunas: {list(df_votos.columns)}")
+        if len(df_votos) > 0:
+            st.info(f"Linha exemplo votos: {df_votos.iloc[0].to_dict()}")
+
     col_id_vot = next(
         (c for c in df_votos.columns
-         if c.lower() in ["idvotacao", "id_votacao", "id"]),
+         if c.lower() in ["idvotacao", "id_votacao"]),
         None,
     )
     col_id_dep = next(
@@ -381,22 +388,12 @@ def buscar_voto_deputado(id_deputado: int, id_votacao: str, ano_vot: int) -> str
     )
     col_voto = next(
         (c for c in df_votos.columns
-         if c.lower() in ["tipovoto", "voto", "descricao"]),
+         if c.lower() in ["tipovoto", "voto"]),
         None,
     )
 
     if not col_id_vot or not col_id_dep or not col_voto:
-        if "votos_cols_logados" not in st.session_state:
-            st.session_state["votos_cols_logados"] = True
-            st.warning(f"⚠️ CSV votos — colunas: {list(df_votos.columns)}")
-            if len(df_votos) > 0:
-                st.info(f"Exemplo voto: {df_votos.iloc[0].to_dict()}")
         return "—"
-
-    # Log de diagnóstico — mostra uma vez as colunas encontradas
-    if "votos_cols_ok_logados" not in st.session_state:
-        st.session_state["votos_cols_ok_logados"] = True
-        st.info(f"✅ CSV votos OK: id_vot={col_id_vot} | id_dep={col_id_dep} | voto={col_voto}")
 
     linha = df_votos[
         (df_votos[col_id_vot].astype(str) == str(id_votacao)) &
