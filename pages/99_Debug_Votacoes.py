@@ -177,37 +177,54 @@ st.divider()
 # BLOCO 3 — BUSCA POR KEYWORD NA DESCRIÇÃO DO CSV
 # ============================================================
 
-st.header("3️⃣ Busca por keyword na descrição do CSV de votações")
-st.caption("Busca o idVotacao pelo texto na coluna 'descricao' — funciona para substitutivos e PLVs.")
+st.header("3️⃣ Busca por keyword no CSV de votações")
+st.caption(
+    "Busca em TODAS as colunas de texto: descricao, ultimaApresentacaoProposicao_descricao "
+    "e ultimaApresentacaoProposicao_uriProposicao. Quanto mais específica a keyword, melhor."
+)
 
-col_k1, col_k2 = st.columns(2)
+col_k1, col_k2, col_k3 = st.columns(3)
 with col_k1:
-    keyword = st.text_input("Palavra-chave", placeholder="ex: PL 1087  ou  IR  ou  isenção")
+    keyword = st.text_input("Palavra-chave", placeholder="ex: 1087  ou  isenção  ou  1294")
 with col_k2:
     ano_kw = st.selectbox("Ano", [2023, 2024, 2025], key="ano_kw")
+with col_k3:
+    apenas_plenario = st.checkbox("Apenas PLEN (plenário)", value=True)
 
-if st.button("Buscar na descrição", key="btn_kw") and keyword:
+if st.button("Buscar", key="btn_kw") and keyword:
     with st.spinner("Baixando CSV de votações..."):
         df_vot = baixar_csv(URL_VOTACOES.format(ano=ano_kw))
     if df_vot is not None:
-        col_descr = next((c for c in df_vot.columns if "descricao" in c.lower()), None)
-        col_id    = next((c for c in df_vot.columns if c == "id"), None)
-        if not col_descr:
-            st.error(f"Coluna descricao não encontrada. Colunas: {df_vot.columns.tolist()}")
+        colunas_texto = [c for c in df_vot.columns if any(
+            t in c.lower() for t in ["descricao", "uri"]
+        )]
+        st.caption(f"Buscando nas colunas: {colunas_texto}")
+
+        mask = pd.Series([False] * len(df_vot), index=df_vot.index)
+        for col in colunas_texto:
+            mask |= df_vot[col].astype(str).str.contains(keyword, case=False, na=False)
+
+        if apenas_plenario and "siglaOrgao" in df_vot.columns:
+            mask &= df_vot["siglaOrgao"].astype(str).str.upper() == "PLEN"
+
+        resultado = df_vot[mask].copy()
+        st.write(f"Matches: **{len(resultado)}**")
+        if resultado.empty:
+            st.warning("Nenhuma linha encontrada.")
+            if "siglaOrgao" in df_vot.columns:
+                st.write("Órgãos disponíveis:", df_vot["siglaOrgao"].value_counts().head(10).to_dict())
         else:
-            mask = df_vot[col_descr].astype(str).str.contains(keyword, case=False, na=False)
-            resultado = df_vot[mask]
-            st.write(f"Coluna: `{col_descr}` | Matches: **{len(resultado)}**")
-            if resultado.empty:
-                st.warning("Nenhuma linha encontrada.")
-            else:
-                st.success(f"{len(resultado)} votação(ões) encontrada(s)!")
-                # Mostra colunas mais relevantes
-                cols_show = [c for c in ["id", "data", "descricao",
-                             "ultimaApresentacaoProposicao_descricao",
-                             "ultimaApresentacaoProposicao_idProposicao",
-                             "aprovacao"] if c in df_vot.columns]
-                st.dataframe(resultado[cols_show], use_container_width=True, hide_index=True)
+            st.success(f"{len(resultado)} votação(ões) encontrada(s)!")
+            cols_show = [c for c in [
+                "id", "data", "siglaOrgao", "aprovacao", "votosSimm", "votosNao",
+                "descricao",
+                "ultimaApresentacaoProposicao_descricao",
+                "ultimaApresentacaoProposicao_idProposicao",
+                "ultimaApresentacaoProposicao_uriProposicao",
+            ] if c in df_vot.columns]
+            st.dataframe(resultado[cols_show], use_container_width=True, hide_index=True)
+            csv_out = resultado[cols_show].to_csv(index=False).encode("utf-8")
+            st.download_button("⬇️ Exportar resultado", csv_out, "resultado_busca.csv", "text/csv")
 
 st.divider()
 
