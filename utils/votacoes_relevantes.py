@@ -422,19 +422,20 @@ def buscar_voto_deputado(id_deputado: int, id_votacao: str, ano_vot: int) -> str
 def buscar_votos_relevantes_deputado(id_deputado: int) -> list:
     """
     Retorna os votos de um deputado nas votações relevantes curadas.
-    Só busca votações que já ocorreram (status ✅ ou ❌).
-
-    Retorna lista de dicts:
-    [
-        {
-            "tema": str,
-            "status": str,
-            "resultado": str,
-            "voto": str,
-            "ano": int,
-        }
-    ]
     """
+    # Log para diagnóstico — mostra o ID recebido e compara com CSV de votos
+    if "id_dep_log" not in st.session_state:
+        st.session_state["id_dep_log"] = True
+        st.info(f"🔍 ID deputado recebido (API Câmara): {id_deputado}")
+        # Mostra exemplo do CSV de votos para comparar
+        df_v = _baixar_votos_ano(2023)
+        if df_v is not None and len(df_v) > 0:
+            col_dep = next((c for c in df_v.columns if "deputado" in c.lower()), None)
+            if col_dep:
+                exemplos = df_v[col_dep].dropna().unique()[:3].tolist()
+                st.info(f"📋 Exemplos de IDs no CSV votos (col '{col_dep}'): {exemplos}")
+            st.info(f"📋 Todas colunas CSV votos: {list(df_v.columns)}")
+
     resultados = []
 
     for v in VOTACOES_RELEVANTES:
