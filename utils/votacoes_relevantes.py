@@ -301,19 +301,6 @@ def _baixar_votos_ano(ano: int) -> pd.DataFrame | None:
     return None
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
-def _inspecionar_csv_votacoes(ano: int) -> dict:
-    """Retorna metadados do CSV de votações para diagnóstico."""
-    df = _baixar_votacoes_ano(ano)
-    if df is None:
-        return {"erro": "CSV não baixado"}
-    return {
-        "colunas": list(df.columns),
-        "linhas": len(df),
-        "amostra": df.iloc[0].to_dict() if len(df) > 0 else {},
-    }
-
-
 def buscar_id_votacao(sigla: str, numero: str, ano_prop: int, ano_vot: int) -> str | None:
     """
     Busca o idVotacao de uma proposição nos CSVs anuais.
@@ -322,35 +309,37 @@ def buscar_id_votacao(sigla: str, numero: str, ano_prop: int, ano_vot: int) -> s
     if df_vot is None:
         return None
 
-    # Log das colunas disponíveis (só na primeira vez por sessão)
-    if "votacoes_cols_logadas" not in st.session_state:
-        st.session_state["votacoes_cols_logadas"] = True
-        st.info(f"📋 Colunas CSV votações {ano_vot}: {list(df_vot.columns)}")
-        if len(df_vot) > 0:
-            st.info(f"📄 Exemplo linha 1: {df_vot.iloc[0].to_dict()}")
+    # Coluna correta de descrição da proposição (campo mais rico)
+    # Estrutura real do CSV confirmada:
+    #   id                                          → idVotacao
+    #   descricao                                   → texto da votação
+    #   ultimaApresentacaoProposicao_descricao      → tem sigla/número
+    #   ultimaApresentacaoProposicao_idProposicao   → ID da proposição
+    col_id = "id"  # confirmado no CSV
 
-    # Coluna de descrição da votação
-    col_desc = next(
-        (c for c in df_vot.columns if "descricao" in c.lower() or "objeto" in c.lower() or "proposicao" in c.lower()),
-        None,
-    )
-    col_id = next(
-        (c for c in df_vot.columns if c.lower() in ["id", "idvotacao", "id_votacao"]),
-        None,
-    )
+    # Busca em múltiplos campos de descrição
+    cols_busca = [
+        "ultimaApresentacaoProposicao_descricao",
+        "ultimaAberturaVotacao_descricao",
+        "descricao",
+    ]
 
-    if not col_desc or not col_id:
-        st.warning(f"⚠️ Colunas não encontradas: desc={col_desc} | id={col_id}")
-        return None
+    termos = [
+        f"{sigla} {numero}/{ano_prop}",
+        f"{sigla} {numero}",
+        f"{sigla}{numero}",
+    ]
 
-    # Busca pela sigla e número na descrição
-    mask = (
-        df_vot[col_desc].str.contains(f"{sigla} {numero}", case=False, na=False, regex=False)
-    )
+    for col in cols_busca:
+        if col not in df_vot.columns:
+            continue
+        for termo in termos:
+            mask = df_vot[col].str.contains(termo, case=False, na=False, regex=False)
+            resultado = df_vot[mask]
+            if not resultado.empty:
+                return resultado.iloc[0][col_id]
 
-    resultado = df_vot[mask]
-    if resultado.empty:
-        return None
+    return None
 
     return resultado.iloc[0][col_id]
 
@@ -369,20 +358,33 @@ def buscar_voto_deputado(id_deputado: int, id_votacao: str, ano_vot: int) -> str
     if df_votos is None:
         return "—"
 
+    # Colunas do CSV votacoesVotos — nomes reais da API da Câmara
+    # idVotacao, idDeputado (ou deputado_id), tipoVoto (ou voto)
     col_id_vot = next(
-        (c for c in df_votos.columns if "idvotacao" in c.lower() or c.lower() == "id_votacao"),
+        (c for c in df_votos.columns
+         if c.lower() in ["idvotacao", "id_votacao", "id"]),
         None,
     )
     col_id_dep = next(
-        (c for c in df_votos.columns if "iddeputado" in c.lower() or "id_deputado" in c.lower()),
+        (c for c in df_votos.columns
+         if "iddeputado" in c.lower()
+         or "deputado_id" in c.lower()
+         or c.lower() == "id_deputado"),
         None,
     )
     col_voto = next(
-        (c for c in df_votos.columns if c.lower() in ["tipovoto", "voto"]),
+        (c for c in df_votos.columns
+         if c.lower() in ["tipovoto", "voto", "descricao"]),
         None,
     )
 
     if not col_id_vot or not col_id_dep or not col_voto:
+        # Log para diagnóstico — remove depois de validar
+        if "votos_cols_logados" not in st.session_state:
+            st.session_state["votos_cols_logados"] = True
+            st.warning(f"⚠️ CSV votos — colunas: {list(df_votos.columns)}")
+            if len(df_votos) > 0:
+                st.info(f"Exemplo: {df_votos.iloc[0].to_dict()}")
         return "—"
 
     linha = df_votos[
