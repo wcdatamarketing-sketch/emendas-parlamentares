@@ -4,27 +4,24 @@
 # Lista curada das principais votações do plenário da Câmara
 # na 57ª legislatura (2023-2026) com repercussão nacional.
 #
-# Estratégia de cruzamento:
-#   1. CSVs anuais de votações: votacoes-{ano}.csv
-#      Cada linha tem idVotacao + descrição
-#   2. Busca por siglaTipo+número+ano da proposição
-#   3. Cruza com votacoesVotos-{ano}.csv pelo idVotacao
-#      para pegar o voto de cada deputado
+# Estratégia de cruzamento (dois níveis com fallback):
 #
-# Os IDs são buscados dinamicamente — não hardcodados —
-# para resistir a mudanças na API.
-# ============================================================
-
-# ============================================================
-# LISTA CURADA DE VOTAÇÕES RELEVANTES
-# Cada item tem:
-#   tema:       descrição curta para exibição
-#   sigla:      tipo da proposição (PEC, PLP, PL, etc.)
-#   numero:     número da proposição
-#   ano_prop:   ano de apresentação da proposição
-#   ano_vot:    ano em que foi votada na Câmara
-#   resultado:  resultado geral da votação
-#   status:     ✅ Aprovada | ❌ Rejeitada | 🔄 Em andamento
+#   Nível 1 — por idProposicao:
+#     1. Busca o ID da proposição na API da Câmara
+#     2. Cruza com votacoes-{ano}.csv pelo campo
+#        ultimaApresentacaoProposicao_idProposicao
+#
+#   Nível 2 — por palavras-chave na descrição (fallback):
+#     Se o nível 1 não encontrar (proposição com ID diferente
+#     no CSV, PEC, substitutivo etc.), busca pelo campo
+#     "descricao" do CSV usando sigla + número + ano.
+#
+#   Nível 3 — por endpoint da API:
+#     Se os CSVs não resolverem, consulta a API de votações
+#     filtrando pela proposição.
+#
+#   Com o idVotacao em mãos, cruza com votacoesVotos-{ano}.csv
+#   para pegar o voto de cada deputado.
 # ============================================================
 
 VOTACOES_RELEVANTES = [
@@ -234,10 +231,11 @@ VOTACOES_RELEVANTES = [
 
 
 # ============================================================
-# BUSCA DOS IDs DE VOTAÇÃO NOS CSVs ANUAIS
+# IMPORTS
 # ============================================================
 
 import io
+import re
 import requests
 import pandas as pd
 import streamlit as st
@@ -252,6 +250,10 @@ URL_VOTOS_CSV = (
     "/csv/votacoesVotos-{ano}.csv"
 )
 
+
+# ============================================================
+# DOWNLOAD E CACHE DOS CSVs
+# ============================================================
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def _baixar_votacoes_ano(ano: int) -> pd.DataFrame | None:
@@ -301,9 +303,16 @@ def _baixar_votos_ano(ano: int) -> pd.DataFrame | None:
     return None
 
 
+# ============================================================
+# BUSCA DO ID DA PROPOSIÇÃO NA API
+# ============================================================
+
 @st.cache_data(ttl=86400, show_spinner=False)
 def _buscar_id_proposicao(sigla: str, numero: str, ano_prop: int) -> str | None:
-    """Busca o ID da proposição na API da Câmara pelo tipo/número/ano."""
+    """
+    Busca o ID da proposição na API da Câmara pelo tipo/número/ano.
+    Retorna o ID como string, ou None se não encontrar.
+    """
     try:
         r = requests.get(
             "https://dadosabertos.camara.leg.br/api/v2/proposicoes",
@@ -319,77 +328,156 @@ def _buscar_id_proposicao(sigla: str, numero: str, ano_prop: int) -> str | None:
     return None
 
 
+# ============================================================
+# BUSCA DO idVotacao — 3 NÍVEIS COM FALLBACK
+# ============================================================
+
+@st.cache_data(ttl=86400, show_spinner=False)
 def buscar_id_votacao(sigla: str, numero: str, ano_prop: int, ano_vot: int) -> str | None:
     """
-    Busca o idVotacao cruzando pelo idProposicao.
-    1. Busca o ID da proposição na API
-    2. Cruza com o CSV de votações pelo campo ultimaApresentacaoProposicao_idProposicao
+    Localiza o idVotacao da votação principal de uma proposição.
+
+    Nível 1 — idProposicao (cruzamento direto):
+        Busca o ID da proposição na API e cruza com o CSV de votações
+        pelo campo ultimaApresentacaoProposicao_idProposicao.
+        Retorna a ÚLTIMA linha encontrada (votação final/mais recente).
+
+    Nível 2 — busca por palavras-chave na descrição:
+        Se o nível 1 falhar (ex.: PEC com ID diferente no CSV,
+        substitutivo, redação final), busca na coluna "descricao"
+        do CSV por padrão "SIGLA NUM/ANO".
+
+    Nível 3 — endpoint /votacoes da API:
+        Se os CSVs não resolverem, consulta a API diretamente
+        usando idProposicao como filtro.
+
+    Retorna idVotacao como string ou None.
     """
     df_vot = _baixar_votacoes_ano(ano_vot)
-    if df_vot is None:
-        return None
 
-    col_id = "id"
-    col_prop_id = "ultimaApresentacaoProposicao_idProposicao"
+    # ----------------------------------------------------------
+    # NÍVEL 1 — cruzamento por idProposicao
+    # ----------------------------------------------------------
+    if df_vot is not None:
+        col_id_vot  = _detectar_coluna(df_vot, ["id", "idVotacao"])
+        col_prop_id = _detectar_coluna(df_vot, ["ultimaApresentacaoProposicao_idProposicao"])
 
-    if col_prop_id not in df_vot.columns:
-        return None
+        id_prop = _buscar_id_proposicao(sigla, numero, ano_prop)
 
-    # Busca o ID da proposição via API
-    id_prop = _buscar_id_proposicao(sigla, numero, ano_prop)
+        if id_prop and col_prop_id and col_id_vot:
+            mask = df_vot[col_prop_id].astype(str).str.strip() == str(id_prop).strip()
+            resultado = df_vot[mask]
+            if not resultado.empty:
+                # Pega a última linha — geralmente é a votação final
+                id_vot = resultado.iloc[-1][col_id_vot]
+                _log_debug(f"✅ N1 {sigla} {numero}/{ano_prop}: prop={id_prop} → vot={id_vot}")
+                return str(id_vot).strip()
+            else:
+                _log_debug(
+                    f"⚠️ N1 {sigla} {numero}/{ano_prop}: prop_id={id_prop} não achou no CSV "
+                    f"{ano_vot} ({len(df_vot)} linhas). "
+                    f"Exemplos no CSV: {df_vot[col_prop_id].dropna().unique()[:3].tolist()}"
+                )
 
+    # ----------------------------------------------------------
+    # NÍVEL 2 — busca por palavras-chave na descrição do CSV
+    # ----------------------------------------------------------
+    if df_vot is not None:
+        col_id_vot  = _detectar_coluna(df_vot, ["id", "idVotacao"])
+        col_descr   = _detectar_coluna(df_vot, ["descricao", "proposicaoAutor_uri"])
+
+        if col_descr and col_id_vot:
+            # Monta padrão de busca: "PL 490" ou "PL-490" ou "PL490"
+            # aceita variações como "PL 490/2007"
+            padrao = rf"(?i)\b{re.escape(sigla)}\s*[/-]?\s*{re.escape(numero)}\b"
+            mask = df_vot[col_descr].astype(str).str.contains(padrao, regex=True, na=False)
+            resultado = df_vot[mask]
+            if not resultado.empty:
+                id_vot = resultado.iloc[-1][col_id_vot]
+                _log_debug(f"✅ N2 {sigla} {numero}/{ano_prop}: keyword → vot={id_vot}")
+                return str(id_vot).strip()
+            else:
+                _log_debug(f"⚠️ N2 {sigla} {numero}/{ano_prop}: sem match na descrição")
+
+    # ----------------------------------------------------------
+    # NÍVEL 3 — API /votacoes?idProposicao=...
+    # ----------------------------------------------------------
+    id_prop = id_prop if 'id_prop' in dir() else _buscar_id_proposicao(sigla, numero, ano_prop)
     if id_prop:
-        mask = df_vot[col_prop_id].astype(str) == id_prop
-        resultado = df_vot[mask]
-        if not resultado.empty:
-            id_vot = resultado.iloc[-1][col_id]
-            # Log diagnóstico — remove depois
-            key = f"vot_id_log_{sigla}{numero}"
-            if key not in st.session_state:
-                st.session_state[key] = True
-                st.info(f"🗳️ {sigla} {numero}: prop_id={id_prop} → idVotacao={id_vot}")
-            return id_vot
-        else:
-            key = f"vot_miss_log_{sigla}{numero}"
-            if key not in st.session_state:
-                st.session_state[key] = True
-                st.warning(f"⚠️ {sigla} {numero}: prop_id={id_prop} não encontrado no CSV votações {ano_vot} (total linhas: {len(df_vot)})")
-                # Mostra amostra do campo para comparar
-                amostra = df_vot[col_prop_id].dropna().unique()[:3].tolist()
-                st.info(f"Exemplos de idProposicao no CSV: {amostra}")
+        try:
+            r = requests.get(
+                "https://dadosabertos.camara.leg.br/api/v2/votacoes",
+                params={
+                    "idProposicao": id_prop,
+                    "dataInicio":   f"{ano_vot}-01-01",
+                    "dataFim":      f"{ano_vot}-12-31",
+                    "ordenarPor":   "dataHoraRegistro",
+                    "ordem":        "DESC",
+                    "itens":        5,
+                },
+                headers={"Accept": "application/json"},
+                timeout=10,
+            )
+            dados = r.json().get("dados", [])
+            if dados:
+                id_vot = str(dados[0].get("id", ""))
+                if id_vot:
+                    _log_debug(f"✅ N3 {sigla} {numero}/{ano_prop}: API → vot={id_vot}")
+                    return id_vot
+            else:
+                _log_debug(f"❌ N3 {sigla} {numero}/{ano_prop}: API sem resultados")
+        except Exception as e:
+            _log_debug(f"❌ N3 {sigla} {numero}/{ano_prop}: erro na API — {e}")
 
     return None
 
-    return resultado.iloc[0][col_id]
 
+def _detectar_coluna(df: pd.DataFrame, candidatos: list[str]) -> str | None:
+    """Retorna o primeiro nome de coluna que existir no DataFrame."""
+    for c in candidatos:
+        if c in df.columns:
+            return c
+    return None
+
+
+def _log_debug(msg: str) -> None:
+    """
+    Exibe log de diagnóstico no Streamlit apenas uma vez por sessão.
+    Remove este helper quando o debug estiver concluído.
+    """
+    chave = f"_vot_log_{hash(msg)}"
+    if chave not in st.session_state:
+        st.session_state[chave] = True
+        st.caption(f"🔍 {msg}")
+
+
+# ============================================================
+# VOTO DO DEPUTADO EM UMA VOTAÇÃO ESPECÍFICA
+# ============================================================
 
 def buscar_voto_deputado(id_deputado: int, id_votacao: str, ano_vot: int) -> str:
     """
     Retorna o voto de um deputado em uma votação específica.
 
-    id_deputado: ID do deputado na API da Câmara
-    id_votacao:  ID da votação
-    ano_vot:     ano em que ocorreu a votação
+    Usa o CSV votacoesVotos-{ano}.csv.
+    Colunas confirmadas: idVotacao, deputado_id, voto
 
-    Retorna: "Sim", "Não", "Abstenção", "Obstrução", "Ausente" ou "—"
+    Retorna string formatada: "✅ Sim", "❌ Não", etc.
     """
     df_votos = _baixar_votos_ano(ano_vot)
     if df_votos is None:
         return "—"
 
-    # Colunas do CSV votacoesVotos — nomes reais da API da Câmara
-    # idVotacao, idDeputado (ou deputado_id), tipoVoto (ou voto)
-    # Colunas confirmadas no CSV votacoesVotos
-    col_id_vot = "idVotacao"
-    col_id_dep = "deputado_id"
-    col_voto   = "voto"
+    col_id_vot = _detectar_coluna(df_votos, ["idVotacao"])
+    col_id_dep = _detectar_coluna(df_votos, ["deputado_id", "idDeputado"])
+    col_voto   = _detectar_coluna(df_votos, ["voto", "tipoVoto"])
 
-    if col_id_vot not in df_votos.columns or col_id_dep not in df_votos.columns or col_voto not in df_votos.columns:
+    if not col_id_vot or not col_id_dep or not col_voto:
         return "—"
 
     linha = df_votos[
-        (df_votos[col_id_vot].astype(str) == str(id_votacao)) &
-        (df_votos[col_id_dep].astype(str) == str(id_deputado))
+        (df_votos[col_id_vot].astype(str).str.strip() == str(id_votacao).strip()) &
+        (df_votos[col_id_dep].astype(str).str.strip() == str(id_deputado).strip())
     ]
 
     if linha.empty:
@@ -410,6 +498,10 @@ def buscar_voto_deputado(id_deputado: int, id_votacao: str, ano_vot: int) -> str
     return mapa.get(voto_raw, voto_raw.title())
 
 
+# ============================================================
+# ENTRY POINT PRINCIPAL
+# ============================================================
+
 @st.cache_data(ttl=3600, show_spinner="Buscando votações relevantes...")
 def buscar_votos_relevantes_deputado(id_deputado: int) -> list:
     """
@@ -418,7 +510,7 @@ def buscar_votos_relevantes_deputado(id_deputado: int) -> list:
     resultados = []
 
     for v in VOTACOES_RELEVANTES:
-        # Pula votações ainda em andamento
+        # Votações ainda não realizadas
         if v["status"] == "🔄":
             resultados.append({
                 "tema":      v["tema"],
@@ -429,7 +521,6 @@ def buscar_votos_relevantes_deputado(id_deputado: int) -> list:
             })
             continue
 
-        # Busca o ID da votação
         id_vot = buscar_id_votacao(
             v["sigla"], v["numero"], v["ano_prop"], v["ano_vot"]
         )
