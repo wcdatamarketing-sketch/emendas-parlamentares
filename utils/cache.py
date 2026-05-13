@@ -36,32 +36,40 @@ from utils.api_camara import (
 # PORTAL DA TRANSPARÊNCIA (via data_loader)
 # ============================================================
 
-@st.cache_data(ttl=3600)
+import datetime
+_ANO_ATUAL = datetime.date.today().year
+
+def _ttl_por_ano(ano: int) -> int:
+    """7 dias para anos históricos, 1h para o ano atual."""
+    return 604800 if ano < _ANO_ATUAL else 3600
+
+
+@st.cache_data(ttl=604800)
 def cache_emendas_por_autor(api_key: str, nome_autor: str, ano: int) -> list:
     return carregar_emendas_por_autor(api_key, nome_autor, ano)
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=604800)
 def cache_emendas_ranking(api_key: str, ano: int) -> list:
     return carregar_emendas_ranking(api_key, ano)
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=86400)
 def cache_detalhe_emenda(api_key: str, codigo_emenda: str) -> dict:
     return carregar_detalhe_emenda(api_key, codigo_emenda)
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=604800)
 def cache_emendas_por_municipio(api_key: str, municipio: str, ano: int) -> list:
     return carregar_emendas_por_municipio(api_key, municipio, ano)
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=604800)
 def cache_emendas_por_favorecido(api_key: str, nome_favorecido: str, ano: int) -> list:
     return carregar_emendas_por_favorecido(api_key, nome_favorecido, ano)
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=604800)
 def cache_top_favorecidos(
     nome_autor: str = None,
     sigla_partido: str = None,
