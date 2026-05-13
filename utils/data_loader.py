@@ -221,7 +221,8 @@ def _df_para_lista(df: pd.DataFrame) -> list:
 
 # ============================================================
 # CACHE DOS DATAFRAMES
-# Cada arquivo é baixado UMA vez e mantido em memória por 1h
+# CSV histórico: TTL de 7 dias (dados não mudam)
+# Complemento API 2026: TTL de 1h (dados recentes)
 # ============================================================
 
 @st.cache_data(ttl=86400, show_spinner="Carregando lista de deputados...")
@@ -239,7 +240,7 @@ def _nomes_deputados_federais() -> set:
         return set()  # Se falhar, não filtra (evita perder dados)
 
 
-@st.cache_data(ttl=3600, show_spinner="Carregando base de emendas...")
+@st.cache_data(ttl=604800, show_spinner="Carregando base de emendas...")  # 7 dias — dados históricos
 def _df_principal() -> pd.DataFrame | None:
     df = _baixar_csv_drive(ID_EMENDAS_PRINCIPAL, grande=True)  # 46 MB
     if df is not None:
@@ -258,7 +259,7 @@ def _df_principal() -> pd.DataFrame | None:
     return df
 
 
-@st.cache_data(ttl=3600, show_spinner="Carregando base de convênios...")
+@st.cache_data(ttl=604800, show_spinner="Carregando base de convênios...")  # 7 dias
 def _df_convenios() -> pd.DataFrame | None:
     df = _baixar_csv_drive(ID_EMENDAS_CONVENIOS, grande=False)
     if df is not None:
@@ -266,7 +267,7 @@ def _df_convenios() -> pd.DataFrame | None:
     return df
 
 
-@st.cache_data(ttl=3600, show_spinner="Carregando base de favorecidos...")
+@st.cache_data(ttl=604800, show_spinner="Carregando base de favorecidos...")  # 7 dias
 def _df_favorecido() -> pd.DataFrame | None:
     """
     Baixa o CSV de favorecidos do GitHub Releases.
@@ -314,13 +315,77 @@ def _df_favorecido() -> pd.DataFrame | None:
 # São essas que o cache.py vai chamar no lugar da API direta
 # ============================================================
 
-def carregar_emendas_ranking(api_key: str, ano: int) -> list:
-    """Ranking geral — usa CSV principal (dados completos)."""
+# Ano atual — usado para decidir se complementa com API
+import datetime
+ANO_ATUAL = datetime.date.today().year
+
+
+@st.cache_data(ttl=3600)  # 1h — verifica dados recentes frequentemente
+def _ultimo_mes_csv(ano: int) -> int | None:
+    """
+    Retorna o último mês disponível no CSV para um ano.
+    Usado para saber a partir de quando complementar com a API.
+    Retorna None se o ano não estiver no CSV.
+    """
     df = _df_principal()
-    if df is not None:
-        df_ano = df[df["ano"].astype(str) == str(ano)].copy() if "ano" in df.columns else df.copy()
+    if df is None or "ano" not in df.columns:
+        return None
+    df_ano = df[df["ano"].astype(str) == str(ano)]
+    if df_ano.empty:
+        return None
+    # Se tiver coluna de mês/data, extrai o último mês
+    for col in ["mesAno", "mes", "dataEmenda", "Ano/Mês"]:
+        if col in df_ano.columns:
+            try:
+                meses = df_ano[col].astype(str).str[:7]  # "2026/03" ou "2026-03"
+                ultimo = meses.dropna().max()
+                return int(ultimo[-2:])  # pega o mês
+            except Exception:
+                pass
+    # Se não tem coluna de mês, assume que o CSV tem o ano completo
+    # (exceto para o ano atual — assume até mês anterior)
+    if ano < ANO_ATUAL:
+        return 12
+    return datetime.date.today().month - 1 or 1
+
+
+def carregar_emendas_ranking(api_key: str, ano: int) -> list:
+    """
+    Ranking geral — CSV para dados históricos, API para complementar 2026.
+
+    Para anos anteriores ao atual: usa apenas o CSV (dados completos).
+    Para o ano atual: usa CSV + complementa com API para meses faltantes.
+    """
+    df = _df_principal()
+    resultados = []
+
+    if df is not None and "ano" in df.columns:
+        df_ano = df[df["ano"].astype(str) == str(ano)].copy()
         if not df_ano.empty:
-            return _df_para_lista(df_ano)
+            resultados = _df_para_lista(df_ano)
+
+    # Para o ano atual, complementa com API se o CSV não tiver dados recentes
+    if ano == ANO_ATUAL:
+        try:
+            dados_api = buscar_emendas_ranking(api_key, ano)
+            if dados_api:
+                # Junta CSV + API, remove duplicatas pelo codigoEmenda
+                df_csv = pd.DataFrame(resultados) if resultados else pd.DataFrame()
+                df_api = pd.DataFrame(dados_api)
+                if not df_csv.empty and "codigoEmenda" in df_csv.columns and "codigoEmenda" in df_api.columns:
+                    codigos_csv = set(df_csv["codigoEmenda"].dropna().unique())
+                    df_novos = df_api[~df_api["codigoEmenda"].isin(codigos_csv)]
+                    df_final = pd.concat([df_csv, df_novos], ignore_index=True)
+                    return _df_para_lista(df_final)
+                elif df_csv.empty:
+                    return dados_api
+        except Exception:
+            pass  # Se API falhar, usa só o CSV
+
+    if resultados:
+        return resultados
+
+    # Fallback total: API
     return buscar_emendas_ranking(api_key, ano)
 
 
