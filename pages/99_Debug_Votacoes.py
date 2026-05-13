@@ -4,7 +4,6 @@
 # ============================================================
 
 import io
-import re
 import requests
 import pandas as pd
 import streamlit as st
@@ -67,6 +66,31 @@ def api_get(endpoint: str, params: dict = None) -> dict:
 
 
 # ============================================================
+# BLOCO 0 — BUSCAR ID DO DEPUTADO POR NOME
+# ============================================================
+
+st.header("0️⃣ Buscar ID do deputado por nome")
+
+nome_dep = st.text_input("Nome (parcial)", placeholder="ex: Erika Kokay")
+if st.button("Buscar deputado", key="btn_dep") and nome_dep:
+    dados = api_get("/deputados", {
+        "nome": nome_dep, "idLegislatura": 57, "itens": 10
+    }).get("dados", [])
+    if not dados:
+        st.warning("Nenhum deputado encontrado.")
+    else:
+        rows = [{
+            "id":      d.get("id"),
+            "nome":    d.get("nome"),
+            "partido": d.get("siglaPartido"),
+            "uf":      d.get("siglaUf"),
+        } for d in dados]
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+st.divider()
+
+
+# ============================================================
 # BLOCO 1 — COLUNAS DOS CSVs
 # ============================================================
 
@@ -83,10 +107,8 @@ with col1:
             df = baixar_csv(URL_VOTACOES.format(ano=ano_col))
         if df is not None:
             st.success(f"{len(df.columns)} colunas | {len(df):,} linhas")
-            st.write("**Colunas:**")
             for i, c in enumerate(df.columns):
                 st.text(f"[{i:02d}] {c}")
-            st.write("**Amostra (3 linhas):**")
             st.dataframe(df.head(3), use_container_width=True)
 
 with col2:
@@ -96,10 +118,8 @@ with col2:
             df = baixar_csv(URL_VOTOS.format(ano=ano_col), timeout=180)
         if df is not None:
             st.success(f"{len(df.columns)} colunas | {len(df):,} linhas")
-            st.write("**Colunas:**")
             for i, c in enumerate(df.columns):
                 st.text(f"[{i:02d}] {c}")
-            st.write("**Amostra (3 linhas):**")
             st.dataframe(df.head(3), use_container_width=True)
 
 st.divider()
@@ -123,87 +143,118 @@ ALVOS_DEFAULT = [
 if st.button("🔍 Buscar todos os casos problemáticos", key="btn_alvos"):
     for sigla, numero, ano_prop, ano_vot, desc in ALVOS_DEFAULT:
         st.markdown(f"---\n**{desc} ({sigla} {numero}/{ano_prop} → votado em {ano_vot})**")
-
-        # Busca ID da proposição
         dados_prop = api_get("/proposicoes", {
             "siglaTipo": sigla, "numero": numero, "ano": ano_prop
         }).get("dados", [])
-
         if not dados_prop:
             st.warning("Proposição não encontrada na API.")
             continue
-
         id_prop = dados_prop[0]["id"]
         st.write(f"✅ id_proposicao = `{id_prop}`")
-
-        # Busca votações dessa proposição
         dados_vot = api_get("/votacoes", {
             "idProposicao": id_prop,
-            "dataInicio":   f"{ano_vot}-01-01",
-            "dataFim":      f"{ano_vot}-12-31",
-            "ordenarPor":   "dataHoraRegistro",
-            "ordem":        "DESC",
-            "itens":        10,
+            "dataInicio": f"{ano_vot}-01-01",
+            "dataFim":    f"{ano_vot}-12-31",
+            "ordenarPor": "dataHoraRegistro",
+            "ordem": "DESC", "itens": 10,
         }).get("dados", [])
-
         if not dados_vot:
             st.warning(f"Nenhuma votação encontrada via API em {ano_vot}.")
         else:
             rows = [{
-                "idVotacao":   v.get("id"),
-                "data":        str(v.get("dataHoraRegistro", ""))[:10],
-                "descricao":   str(v.get("descricao", ""))[:100],
-                "aprovacao":   v.get("aprovacao"),
+                "idVotacao": v.get("id"),
+                "data":      str(v.get("dataHoraRegistro", ""))[:10],
+                "descricao": str(v.get("descricao", ""))[:100],
+                "aprovacao": v.get("aprovacao"),
             } for v in dados_vot]
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-            st.code(f'"id_votacao": "{dados_vot[0]["id"]}"   # {desc} — votação mais recente')
+            st.code(f'"id_votacao": "{dados_vot[0]["id"]}"   # {desc}')
 
 st.divider()
 
 
 # ============================================================
-# BLOCO 3 — CRUZAMENTO MANUAL
+# BLOCO 3 — BUSCA POR KEYWORD NA DESCRIÇÃO DO CSV
 # ============================================================
 
-st.header("3️⃣ Cruzamento manual — idProposicao no CSV")
-st.caption("Verifica se um idProposicao específico existe no campo ultimaApresentacaoProposicao_idProposicao.")
+st.header("3️⃣ Busca por keyword na descrição do CSV de votações")
+st.caption("Busca o idVotacao pelo texto na coluna 'descricao' — funciona para substitutivos e PLVs.")
+
+col_k1, col_k2 = st.columns(2)
+with col_k1:
+    keyword = st.text_input("Palavra-chave", placeholder="ex: PL 1087  ou  IR  ou  isenção")
+with col_k2:
+    ano_kw = st.selectbox("Ano", [2023, 2024, 2025], key="ano_kw")
+
+if st.button("Buscar na descrição", key="btn_kw") and keyword:
+    with st.spinner("Baixando CSV de votações..."):
+        df_vot = baixar_csv(URL_VOTACOES.format(ano=ano_kw))
+    if df_vot is not None:
+        col_descr = next((c for c in df_vot.columns if "descricao" in c.lower()), None)
+        col_id    = next((c for c in df_vot.columns if c == "id"), None)
+        if not col_descr:
+            st.error(f"Coluna descricao não encontrada. Colunas: {df_vot.columns.tolist()}")
+        else:
+            mask = df_vot[col_descr].astype(str).str.contains(keyword, case=False, na=False)
+            resultado = df_vot[mask]
+            st.write(f"Coluna: `{col_descr}` | Matches: **{len(resultado)}**")
+            if resultado.empty:
+                st.warning("Nenhuma linha encontrada.")
+            else:
+                st.success(f"{len(resultado)} votação(ões) encontrada(s)!")
+                # Mostra colunas mais relevantes
+                cols_show = [c for c in ["id", "data", "descricao",
+                             "ultimaApresentacaoProposicao_descricao",
+                             "ultimaApresentacaoProposicao_idProposicao",
+                             "aprovacao"] if c in df_vot.columns]
+                st.dataframe(resultado[cols_show], use_container_width=True, hide_index=True)
+
+st.divider()
+
+
+# ============================================================
+# BLOCO 4 — CRUZAMENTO POR idProposicao
+# ============================================================
+
+st.header("4️⃣ Cruzamento por idProposicao no CSV")
+st.caption("Verifica se um idProposicao existe no campo ultimaApresentacaoProposicao_idProposicao.")
 
 col_a, col_b = st.columns(2)
 with col_a:
     id_prop_manual = st.text_input("idProposicao", placeholder="ex: 2487436")
 with col_b:
-    ano_cruz = st.selectbox("Ano do CSV de votações", [2023, 2024, 2025], key="ano_cruz")
+    ano_cruz = st.selectbox("Ano do CSV", [2023, 2024, 2025], key="ano_cruz")
 
 if st.button("Cruzar", key="btn_cruz") and id_prop_manual:
     with st.spinner("Baixando CSV de votações..."):
         df_vot = baixar_csv(URL_VOTACOES.format(ano=ano_cruz))
     if df_vot is not None:
         col_prop = next(
-            (c for c in df_vot.columns if "idProposicao" in c or "Proposicao_id" in c),
+            (c for c in df_vot.columns if "idProposicao" in c),
             None,
         )
         if not col_prop:
-            st.error(f"Coluna de idProposicao não encontrada. Colunas disponíveis: {df_vot.columns.tolist()}")
+            st.error(f"Coluna idProposicao não encontrada. Colunas: {df_vot.columns.tolist()}")
         else:
             mask = df_vot[col_prop].astype(str).str.strip() == str(id_prop_manual).strip()
             resultado = df_vot[mask]
-            st.write(f"Coluna usada: `{col_prop}` | Matches: **{len(resultado)}**")
+            st.write(f"Coluna: `{col_prop}` | Matches: **{len(resultado)}**")
             if resultado.empty:
                 st.warning("Nenhuma linha encontrada.")
                 st.write("Exemplos de valores nessa coluna:")
                 st.write(df_vot[col_prop].dropna().unique()[:10].tolist())
             else:
-                st.success(f"{len(resultado)} votação(ões) encontrada(s)!")
+                st.success(f"{len(resultado)} linha(s) encontrada(s)!")
                 st.dataframe(resultado, use_container_width=True, hide_index=True)
 
 st.divider()
 
 
 # ============================================================
-# BLOCO 4 — VERIFICAR VOTO DE UM DEPUTADO
+# BLOCO 5 — VERIFICAR VOTO DE UM DEPUTADO
 # ============================================================
 
-st.header("4️⃣ Verificar voto de um deputado em uma votação")
+st.header("5️⃣ Verificar voto de um deputado em uma votação")
 
 col_c, col_d, col_e = st.columns(3)
 with col_c:
@@ -217,22 +268,23 @@ if st.button("Buscar voto", key="btn_voto") and id_dep_manual and id_vot_manual:
     with st.spinner("Baixando CSV de votos (pode demorar)..."):
         df_votos = baixar_csv(URL_VOTOS.format(ano=ano_voto), timeout=180)
     if df_votos is not None:
-        st.write("Colunas:", df_votos.columns.tolist())
         col_iv = next((c for c in df_votos.columns if "idVotacao" in c), None)
-        col_id = next((c for c in df_votos.columns if "deputado_id" in c or c == "idDeputado"), None)
+        col_id = next((c for c in df_votos.columns if "deputado_id" in c), None)
         col_v  = next((c for c in df_votos.columns if c in ("voto", "tipoVoto")), None)
-        st.caption(f"Colunas detectadas → votacao={col_iv} | deputado={col_id} | voto={col_v}")
+        st.caption(f"Colunas → votacao={col_iv} | deputado={col_id} | voto={col_v}")
 
         if col_iv and col_id:
             linha = df_votos[
                 (df_votos[col_iv].astype(str).str.strip() == str(id_vot_manual).strip()) &
                 (df_votos[col_id].astype(str).str.strip() == str(id_dep_manual).strip())
             ]
+            linhas_vot = df_votos[df_votos[col_iv].astype(str).str.strip() == str(id_vot_manual).strip()]
+            st.write(f"Total de votos para esse idVotacao: **{len(linhas_vot)}**")
             if linha.empty:
-                st.warning("Nenhum registro encontrado — deputado pode ter sido Ausente.")
-                # Mostra quantas linhas existem para esse idVotacao
-                linhas_vot = df_votos[df_votos[col_iv].astype(str).str.strip() == str(id_vot_manual).strip()]
-                st.write(f"Total de votos registrados para esse idVotacao: {len(linhas_vot)}")
+                st.warning("Deputado não encontrado nessa votação — pode ser Ausente.")
+                if not linhas_vot.empty:
+                    st.write("Amostra de quem votou nessa votação:")
+                    st.dataframe(linhas_vot.head(5), use_container_width=True, hide_index=True)
             else:
                 st.success("Voto encontrado!")
                 st.dataframe(linha, use_container_width=True, hide_index=True)
