@@ -301,21 +301,37 @@ def _baixar_votos_ano(ano: int) -> pd.DataFrame | None:
     return None
 
 
+@st.cache_data(ttl=86400, show_spinner=False)
+def _inspecionar_csv_votacoes(ano: int) -> dict:
+    """Retorna metadados do CSV de votações para diagnóstico."""
+    df = _baixar_votacoes_ano(ano)
+    if df is None:
+        return {"erro": "CSV não baixado"}
+    return {
+        "colunas": list(df.columns),
+        "linhas": len(df),
+        "amostra": df.iloc[0].to_dict() if len(df) > 0 else {},
+    }
+
+
 def buscar_id_votacao(sigla: str, numero: str, ano_prop: int, ano_vot: int) -> str | None:
     """
     Busca o idVotacao de uma proposição nos CSVs anuais.
-    Procura pela descrição da votação que contenha sigla+número.
-
-    Retorna o idVotacao da votação mais relevante encontrada,
-    ou None se não encontrar.
     """
     df_vot = _baixar_votacoes_ano(ano_vot)
     if df_vot is None:
         return None
 
+    # Log das colunas disponíveis (só na primeira vez por sessão)
+    if "votacoes_cols_logadas" not in st.session_state:
+        st.session_state["votacoes_cols_logadas"] = True
+        st.info(f"📋 Colunas CSV votações {ano_vot}: {list(df_vot.columns)}")
+        if len(df_vot) > 0:
+            st.info(f"📄 Exemplo linha 1: {df_vot.iloc[0].to_dict()}")
+
     # Coluna de descrição da votação
     col_desc = next(
-        (c for c in df_vot.columns if "descricao" in c.lower() or "objeto" in c.lower()),
+        (c for c in df_vot.columns if "descricao" in c.lower() or "objeto" in c.lower() or "proposicao" in c.lower()),
         None,
     )
     col_id = next(
@@ -324,15 +340,12 @@ def buscar_id_votacao(sigla: str, numero: str, ano_prop: int, ano_vot: int) -> s
     )
 
     if not col_desc or not col_id:
+        st.warning(f"⚠️ Colunas não encontradas: desc={col_desc} | id={col_id}")
         return None
 
     # Busca pela sigla e número na descrição
-    busca = f"{sigla} {numero}/{ano_prop}"
-    busca_alt = f"{sigla}{numero}"
-
     mask = (
-        df_vot[col_desc].str.contains(busca, case=False, na=False) |
-        df_vot[col_desc].str.contains(f"{sigla} {numero}", case=False, na=False)
+        df_vot[col_desc].str.contains(f"{sigla} {numero}", case=False, na=False, regex=False)
     )
 
     resultado = df_vot[mask]
