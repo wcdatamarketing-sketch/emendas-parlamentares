@@ -7,6 +7,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
+from utils.votacoes_relevantes import buscar_votos_relevantes_deputado, VOTACOES_RELEVANTES
 from utils.cache import (
     cache_emendas_ranking,
     cache_deputados_legislatura,
@@ -560,19 +561,51 @@ if not modo_partido:
 
 
 # ============================================================
-# VOTAÇÕES NOMINAIS
+# VOTAÇÕES RELEVANTES
 # ============================================================
 
-st.markdown("### 🗳️ Votações nominais")
+st.markdown("### 🗳️ Como votou nas principais pautas")
 
 if not modo_partido:
-    col_va, col_vb = st.columns(2)
-    with col_va:
-        st.markdown(f"**🔵 {label_a}**")
-        painel_votacoes(votos_a, label_a)
-    with col_vb:
-        st.markdown(f"**🔴 {label_b}**")
-        painel_votacoes(votos_b, label_b)
+    # Busca os votos de cada deputado nas votações curadas
+    with st.spinner("Buscando votações relevantes..."):
+        votos_rel_a = buscar_votos_relevantes_deputado(id_a) if id_a else []
+        votos_rel_b = buscar_votos_relevantes_deputado(id_b) if id_b else []
+
+    if not votos_rel_a and not votos_rel_b:
+        st.info("Dados de votações não disponíveis para o período selecionado.")
+    else:
+        # Monta tabela comparativa lado a lado
+        # Filtra pelo período selecionado
+        anos_str = [str(a) for a in anos_selecionados]
+
+        df_vot_a = pd.DataFrame(votos_rel_a)
+        df_vot_b = pd.DataFrame(votos_rel_b)
+
+        if not df_vot_a.empty and not df_vot_b.empty:
+            # Filtra pelos anos selecionados
+            df_vot_a = df_vot_a[df_vot_a["ano"].astype(str).isin(anos_str)]
+            df_vot_b = df_vot_b[df_vot_b["ano"].astype(str).isin(anos_str)]
+
+            # Mescla pelo tema
+            df_comp = df_vot_a[["tema", "status", "resultado", "voto", "ano"]].merge(
+                df_vot_b[["tema", "voto"]],
+                on="tema",
+                suffixes=("_a", "_b"),
+            )
+
+            # Renomeia colunas
+            df_comp.columns = ["Pauta", "Status", "Resultado", f"🔵 {label_a}", "Ano", f"🔴 {label_b}"]
+            df_comp = df_comp.sort_values("Ano")
+
+            st.dataframe(
+                df_comp[["Ano", "Pauta", "Status", f"🔵 {label_a}", f"🔴 {label_b}", "Resultado"]],
+                use_container_width=True,
+                hide_index=True,
+                height=500,
+            )
+        else:
+            st.info("Votações relevantes não encontradas para o período selecionado.")
 
 else:
     # Modo partido — mostra totais agregados
