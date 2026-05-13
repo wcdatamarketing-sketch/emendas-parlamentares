@@ -472,8 +472,6 @@ def carregar_top_favorecidos(
             return partes[1].strip()
         return s
 
-    df["_fav_limpo"] = df[col_fav].apply(_limpar_favorecido)
-
     # Extrai ano
     if col_ano_fav:
         df_fav["_ano"] = df_fav[col_ano_fav].astype(str).str[:4]
