@@ -312,10 +312,18 @@ def _buscar_id_proposicao(sigla: str, numero: str, ano_prop: int) -> str | None:
             timeout=10,
         )
         dados = r.json().get("dados", [])
+        # Log temporário — mostra resultado da busca
+        key = f"prop_log_{sigla}{numero}{ano_prop}"
+        if key not in st.session_state:
+            st.session_state[key] = True
+            if dados:
+                st.info(f"✅ {sigla} {numero}/{ano_prop} → ID: {dados[0].get('id')} | {dados[0].get('ementa','')[:50]}")
+            else:
+                st.warning(f"❌ {sigla} {numero}/{ano_prop} → sem resultado na API")
         if dados:
             return str(dados[0].get("id", ""))
-    except Exception:
-        pass
+    except Exception as e:
+        st.error(f"Erro API proposição {sigla} {numero}: {e}")
     return None
 
 
