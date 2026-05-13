@@ -576,64 +576,79 @@ if not modo_partido:
     else:
         anos_str = [str(a) for a in anos_selecionados]
 
-        def _tabela_votos(votos: list, label: str, cor: str) -> None:
-            """Monta tabela individual de votações de um parlamentar."""
-            if not votos:
-                st.info("Sem dados de votações.")
-                return
+        # Monta dicionário indexado por tema para cruzar as duas listas
+        def _votos_por_tema(votos: list) -> dict:
+            return {v["tema"]: v for v in votos}
 
-            df = pd.DataFrame(votos)
-            df = df[df["ano"].astype(str).isin(anos_str)].copy()
+        idx_a = _votos_por_tema(votos_rel_a)
+        idx_b = _votos_por_tema(votos_rel_b)
 
-            if df.empty:
-                st.info("Sem votações no período selecionado.")
-                return
-
-            df = df.sort_values("ano")
-
-            # Monta tabela exibível
-            tabela = pd.DataFrame({
-                "Ano":       df["ano"].astype(str),
-                "Pauta":     df["tema"],
-                "Voto":      df["voto"],
-                "Resultado": df["status"] + " " + df["resultado"],
+        # Usa a lista curada como âncora de ordem (já filtrada por ano)
+        from utils.votacoes_relevantes import VOTACOES_RELEVANTES
+        linhas = []
+        for item in VOTACOES_RELEVANTES:
+            if str(item["ano_vot"]) not in anos_str:
+                continue
+            tema = item["tema"]
+            va   = idx_a.get(tema, {})
+            vb   = idx_b.get(tema, {})
+            linhas.append({
+                "Ano":       str(item["ano_vot"]),
+                "Pauta":     tema,
+                f"🔵 {label_a}": va.get("voto", "—"),
+                f"🔴 {label_b}": vb.get("voto", "—"),
+                "Resultado": item["status"] + " " + item["resultado"],
             })
 
+        if not linhas:
+            st.info("Sem votações no período selecionado.")
+        else:
+            df_votos_unif = pd.DataFrame(linhas)
+
+            # Coloriza células de voto via styler
+            def _cor_voto(val: str) -> str:
+                v = str(val)
+                if "Sim" in v:       return "background-color:#d4edda;color:#155724"
+                if "Não" in v:       return "background-color:#f8d7da;color:#721c24"
+                if "Abstenção" in v: return "background-color:#fff3cd;color:#856404"
+                if "Obstrução" in v: return "background-color:#fde2e4;color:#721c24"
+                if "Ausente" in v:   return "background-color:#e9ecef;color:#495057"
+                if "localizada" in v or "—" in v: return "color:#aaa"
+                return ""
+
+            col_voto_a = f"🔵 {label_a}"
+            col_voto_b = f"🔴 {label_b}"
+
+            styled = (
+                df_votos_unif.style
+                .applymap(_cor_voto, subset=[col_voto_a, col_voto_b])
+                .set_properties(subset=["Pauta"], **{"text-align": "left"})
+                .set_properties(subset=["Ano", col_voto_a, col_voto_b, "Resultado"],
+                                **{"text-align": "center"})
+            )
+
             st.dataframe(
-                tabela,
+                styled,
                 use_container_width=True,
                 hide_index=True,
-                height=450,
+                height=min(60 + len(linhas) * 38, 680),
                 column_config={
-                    "Ano":       st.column_config.TextColumn(width="small"),
-                    "Voto":      st.column_config.TextColumn(width="medium"),
-                    "Pauta":     st.column_config.TextColumn(width="large"),
-                    "Resultado": st.column_config.TextColumn(width="medium"),
+                    "Ano":        st.column_config.TextColumn("Ano",       width=60),
+                    "Pauta":      st.column_config.TextColumn("Pauta",     width="large"),
+                    col_voto_a:   st.column_config.TextColumn(col_voto_a,  width="medium"),
+                    col_voto_b:   st.column_config.TextColumn(col_voto_b,  width="medium"),
+                    "Resultado":  st.column_config.TextColumn("Resultado", width="medium"),
                 },
             )
 
-        col_va, col_vb = st.columns(2)
-
-        with col_va:
-            st.markdown(
-                f"<div style='background:#e8f0fa;padding:8px 12px;"
-                f"border-radius:6px;border-left:4px solid #2e6da4;"
-                f"margin-bottom:8px'><b>🔵 {label_a}</b></div>",
-                unsafe_allow_html=True,
+            # Legenda compacta
+            st.caption(
+                "✅ Sim · ❌ Não · ➖ Abstenção · 🚫 Obstrução · "
+                "Ausente = não registrou voto · ⚠️ Não localizada = votação sem registro nos dados abertos"
             )
-            _tabela_votos(votos_rel_a, label_a, "#2e6da4")
-
-        with col_vb:
-            st.markdown(
-                f"<div style='background:#faeaea;padding:8px 12px;"
-                f"border-radius:6px;border-left:4px solid #c0392b;"
-                f"margin-bottom:8px'><b>🔴 {label_b}</b></div>",
-                unsafe_allow_html=True,
-            )
-            _tabela_votos(votos_rel_b, label_b, "#c0392b")
 
 else:
-    # Modo partido — mostra totais agregados
+    # Modo partido — mantém cards agregados
     col_va, col_vb = st.columns(2)
 
     def _cards_votos_partido(votos: dict, label: str) -> None:
@@ -644,8 +659,8 @@ else:
         deps  = votos.get("deputados", 0)
         st.caption(f"{deps} deputados | {total} votos registrados")
         c1, c2, c3 = st.columns(3)
-        sim = votos.get("total_sim", 0)
-        nao = votos.get("total_nao", 0)
+        sim  = votos.get("total_sim", 0)
+        nao  = votos.get("total_nao", 0)
         abst = votos.get("total_abstencao", 0)
         c1.markdown(_card("✅ Sim",       f"{sim} ({sim/total*100:.0f}%)"   if total else "0"), unsafe_allow_html=True)
         c2.markdown(_card("❌ Não",       f"{nao} ({nao/total*100:.0f}%)"   if total else "0"), unsafe_allow_html=True)
