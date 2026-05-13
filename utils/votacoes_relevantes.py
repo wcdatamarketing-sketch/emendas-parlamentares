@@ -301,43 +301,50 @@ def _baixar_votos_ano(ano: int) -> pd.DataFrame | None:
     return None
 
 
+@st.cache_data(ttl=86400, show_spinner=False)
+def _buscar_id_proposicao(sigla: str, numero: str, ano_prop: int) -> str | None:
+    """Busca o ID da proposição na API da Câmara pelo tipo/número/ano."""
+    try:
+        r = requests.get(
+            "https://dadosabertos.camara.leg.br/api/v2/proposicoes",
+            params={"siglaTipo": sigla, "numero": numero, "ano": ano_prop},
+            headers={"Accept": "application/json"},
+            timeout=10,
+        )
+        dados = r.json().get("dados", [])
+        if dados:
+            return str(dados[0].get("id", ""))
+    except Exception:
+        pass
+    return None
+
+
 def buscar_id_votacao(sigla: str, numero: str, ano_prop: int, ano_vot: int) -> str | None:
     """
-    Busca o idVotacao de uma proposição nos CSVs anuais.
+    Busca o idVotacao cruzando pelo idProposicao.
+    1. Busca o ID da proposição na API
+    2. Cruza com o CSV de votações pelo campo ultimaApresentacaoProposicao_idProposicao
     """
     df_vot = _baixar_votacoes_ano(ano_vot)
     if df_vot is None:
         return None
 
-    # Coluna correta de descrição da proposição (campo mais rico)
-    # Estrutura real do CSV confirmada:
-    #   id                                          → idVotacao
-    #   descricao                                   → texto da votação
-    #   ultimaApresentacaoProposicao_descricao      → tem sigla/número
-    #   ultimaApresentacaoProposicao_idProposicao   → ID da proposição
-    col_id = "id"  # confirmado no CSV
+    col_id = "id"
+    col_prop_id = "ultimaApresentacaoProposicao_idProposicao"
 
-    # Busca em múltiplos campos de descrição
-    cols_busca = [
-        "ultimaApresentacaoProposicao_descricao",
-        "ultimaAberturaVotacao_descricao",
-        "descricao",
-    ]
+    if col_prop_id not in df_vot.columns:
+        return None
 
-    termos = [
-        f"{sigla} {numero}/{ano_prop}",
-        f"{sigla} {numero}",
-        f"{sigla}{numero}",
-    ]
+    # Busca o ID da proposição via API
+    id_prop = _buscar_id_proposicao(sigla, numero, ano_prop)
 
-    for col in cols_busca:
-        if col not in df_vot.columns:
-            continue
-        for termo in termos:
-            mask = df_vot[col].str.contains(termo, case=False, na=False, regex=False)
-            resultado = df_vot[mask]
-            if not resultado.empty:
-                return resultado.iloc[0][col_id]
+    if id_prop:
+        mask = df_vot[col_prop_id].astype(str) == id_prop
+        resultado = df_vot[mask]
+        if not resultado.empty:
+            # Se há múltiplas votações para a mesma proposição,
+            # pega a última (votação final em plenário)
+            return resultado.iloc[-1][col_id]
 
     return None
 
@@ -379,13 +386,17 @@ def buscar_voto_deputado(id_deputado: int, id_votacao: str, ano_vot: int) -> str
     )
 
     if not col_id_vot or not col_id_dep or not col_voto:
-        # Log para diagnóstico — remove depois de validar
         if "votos_cols_logados" not in st.session_state:
             st.session_state["votos_cols_logados"] = True
             st.warning(f"⚠️ CSV votos — colunas: {list(df_votos.columns)}")
             if len(df_votos) > 0:
-                st.info(f"Exemplo: {df_votos.iloc[0].to_dict()}")
+                st.info(f"Exemplo voto: {df_votos.iloc[0].to_dict()}")
         return "—"
+
+    # Log de diagnóstico — mostra uma vez as colunas encontradas
+    if "votos_cols_ok_logados" not in st.session_state:
+        st.session_state["votos_cols_ok_logados"] = True
+        st.info(f"✅ CSV votos OK: id_vot={col_id_vot} | id_dep={col_id_dep} | voto={col_voto}")
 
     linha = df_votos[
         (df_votos[col_id_vot].astype(str) == str(id_votacao)) &
