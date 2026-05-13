@@ -341,86 +341,36 @@ def _buscar_id_proposicao(sigla: str, numero: str, ano_prop: int) -> str | None:
 # BUSCA DO idVotacao — NÍVEL 0 + 3 DINÂMICOS
 # ============================================================
 
-# Padrões que identificam a votação PRINCIPAL (com votos nominais)
-# Ordem importa: primeiro match vence
-_PADROES_VOTACAO_PRINCIPAL = [
-    r"aprovad[ao] o substitutivo",
-    r"aprovad[ao] a subemenda substitutiva",
-    r"aprovad[ao] o projeto de lei",
-    r"aprovad[ao] o pl",
-    r"aprovad[ao] o plp",
-    r"aprovad[ao] a pec",
-    r"aprovad[ao] a medida provisória",
-    r"aprovad[ao] o texto",
-    r"rejeitad[ao] o substitutivo",
-    r"rejeitad[ao] o projeto",
-    r"rejeitad[ao] a medida provisória",
-]
-
-# Padrões que identificam votações PROCEDIMENTAIS (sem votos nominais)
-_PADROES_PROCEDIMENTAL = [
-    r"redação final",
-    r"requerimento",
-    r"regime de tramitação",
-    r"encaminhamento",
-    r"emenda n[º°]",
-    r"recurso\.",
-    r"apensação",
-    r"destaqu",
-]
-
-
-def _selecionar_votacao_principal(df: pd.DataFrame, col_id: str, col_descr: str) -> str | None:
+def _selecionar_votacao_principal(df: pd.DataFrame, col_id: str) -> str | None:
     """
-    Dado um DataFrame com votações candidatas, seleciona a votação principal.
+    Seleciona a votação principal dentre candidatas.
 
-    Estratégia:
-    1. Filtra fora as votações procedimentais (redação final, requerimentos etc.)
-    2. Prioriza linhas cuja descricao bate com padrões de votação principal
-    3. Se não encontrar padrão explícito, usa a linha com MAIOR número de votos (votosSimm + votosNao)
-    4. Fallback: último sequencial do grupo (maior id)
+    A votação nominal (texto principal) sempre tem mais votos que
+    procedimentos (requerimentos, encaminhamentos, redação final).
+    Ordena por votosSimm + votosNao decrescente e pega o topo.
+    Fallback: último sequencial.
     """
     if df.empty:
         return None
 
-    descr = df[col_descr].astype(str).str.lower()
+    col_sim = _detectar_coluna(df, ["votosSimm", "votosSim"])
+    col_nao = _detectar_coluna(df, ["votosNao"])
 
-    # Remove procedimentais
-    mask_proc = pd.Series([False] * len(df), index=df.index)
-    for p in _PADROES_PROCEDIMENTAL:
-        mask_proc |= descr.str.contains(p, regex=True, na=False)
-    df_filtrado = df[~mask_proc]
-
-    # Se filtrou tudo, usa o df original
-    if df_filtrado.empty:
-        df_filtrado = df
-
-    # Tenta achar padrão de votação principal
-    descr_f = df_filtrado[col_descr].astype(str).str.lower()
-    for padrao in _PADROES_VOTACAO_PRINCIPAL:
-        mask_princ = descr_f.str.contains(padrao, regex=True, na=False)
-        candidatos = df_filtrado[mask_princ]
-        if not candidatos.empty:
-            return str(candidatos.iloc[-1][col_id]).strip()
-
-    # Fallback 1: maior número de votos registrados
-    col_sim = _detectar_coluna(df_filtrado, ["votosSimm", "votosSim"])
-    col_nao = _detectar_coluna(df_filtrado, ["votosNao"])
     if col_sim and col_nao:
         try:
-            df_filtrado = df_filtrado.copy()
-            df_filtrado["_total_votos"] = (
-                pd.to_numeric(df_filtrado[col_sim], errors="coerce").fillna(0) +
-                pd.to_numeric(df_filtrado[col_nao], errors="coerce").fillna(0)
+            df = df.copy()
+            df["_total"] = (
+                pd.to_numeric(df[col_sim], errors="coerce").fillna(0) +
+                pd.to_numeric(df[col_nao], errors="coerce").fillna(0)
             )
-            idx_max = df_filtrado["_total_votos"].idxmax()
-            if df_filtrado.loc[idx_max, "_total_votos"] > 0:
-                return str(df_filtrado.loc[idx_max, col_id]).strip()
+            df_sorted = df.sort_values("_total", ascending=False)
+            if df_sorted.iloc[0]["_total"] > 0:
+                return str(df_sorted.iloc[0][col_id]).strip()
         except Exception:
             pass
 
-    # Fallback 2: último sequencial
-    return str(df_filtrado.iloc[-1][col_id]).strip()
+    # Fallback: último sequencial
+    return str(df.iloc[-1][col_id]).strip()
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
@@ -463,7 +413,7 @@ def buscar_id_votacao(
         mask = df_vot[col_prop_id].astype(str).str.strip() == str(id_prop).strip()
         resultado = df_vot[mask]
         if not resultado.empty and col_descr:
-            id_vot = _selecionar_votacao_principal(resultado, col_id_vot, col_descr)
+            id_vot = _selecionar_votacao_principal(resultado, col_id_vot)
             if id_vot:
                 return id_vot
 
@@ -474,7 +424,7 @@ def buscar_id_votacao(
         )
         resultado = df_vot[mask]
         if not resultado.empty and col_descr:
-            id_vot = _selecionar_votacao_principal(resultado, col_id_vot, col_descr)
+            id_vot = _selecionar_votacao_principal(resultado, col_id_vot)
             if id_vot:
                 return id_vot
 
@@ -484,7 +434,7 @@ def buscar_id_votacao(
         mask = df_vot[col_descr].astype(str).str.contains(padrao, regex=True, na=False)
         resultado = df_vot[mask]
         if not resultado.empty:
-            id_vot = _selecionar_votacao_principal(resultado, col_id_vot, col_descr)
+            id_vot = _selecionar_votacao_principal(resultado, col_id_vot)
             if id_vot:
                 return id_vot
 
