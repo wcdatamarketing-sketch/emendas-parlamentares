@@ -367,32 +367,12 @@ def buscar_voto_deputado(id_deputado: int, id_votacao: str, ano_vot: int) -> str
 
     # Colunas do CSV votacoesVotos — nomes reais da API da Câmara
     # idVotacao, idDeputado (ou deputado_id), tipoVoto (ou voto)
-    # Log temporário para ver colunas reais do CSV de votos
-    if "votos_cols_log" not in st.session_state:
-        st.session_state["votos_cols_log"] = True
-        st.info(f"📋 CSV votos colunas: {list(df_votos.columns)}")
-        if len(df_votos) > 0:
-            st.info(f"Linha exemplo votos: {df_votos.iloc[0].to_dict()}")
+    # Colunas confirmadas no CSV votacoesVotos
+    col_id_vot = "idVotacao"
+    col_id_dep = "deputado_id"
+    col_voto   = "voto"
 
-    col_id_vot = next(
-        (c for c in df_votos.columns
-         if c.lower() in ["idvotacao", "id_votacao"]),
-        None,
-    )
-    col_id_dep = next(
-        (c for c in df_votos.columns
-         if "iddeputado" in c.lower()
-         or "deputado_id" in c.lower()
-         or c.lower() == "id_deputado"),
-        None,
-    )
-    col_voto = next(
-        (c for c in df_votos.columns
-         if c.lower() in ["tipovoto", "voto"]),
-        None,
-    )
-
-    if not col_id_vot or not col_id_dep or not col_voto:
+    if col_id_vot not in df_votos.columns or col_id_dep not in df_votos.columns or col_voto not in df_votos.columns:
         return "—"
 
     linha = df_votos[
@@ -423,19 +403,6 @@ def buscar_votos_relevantes_deputado(id_deputado: int) -> list:
     """
     Retorna os votos de um deputado nas votações relevantes curadas.
     """
-    # Log para diagnóstico — mostra o ID recebido e compara com CSV de votos
-    if "id_dep_log" not in st.session_state:
-        st.session_state["id_dep_log"] = True
-        st.info(f"🔍 ID deputado recebido (API Câmara): {id_deputado}")
-        # Mostra exemplo do CSV de votos para comparar
-        df_v = _baixar_votos_ano(2023)
-        if df_v is not None and len(df_v) > 0:
-            col_dep = next((c for c in df_v.columns if "deputado" in c.lower()), None)
-            if col_dep:
-                exemplos = df_v[col_dep].dropna().unique()[:3].tolist()
-                st.info(f"📋 Exemplos de IDs no CSV votos (col '{col_dep}'): {exemplos}")
-            st.info(f"📋 Todas colunas CSV votos: {list(df_v.columns)}")
-
     resultados = []
 
     for v in VOTACOES_RELEVANTES:
